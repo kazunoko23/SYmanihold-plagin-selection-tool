@@ -165,7 +165,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
 /* CANVAS */
 .manifold-scroll{flex:1;overflow:auto;background:#d8eaf8;position:relative;cursor:grab;user-select:none;}
 .manifold-scroll.panning{cursor:grabbing;}
-.svg-canvas-wrap{display:block;padding:600px;box-sizing:border-box;}
+.svg-canvas-wrap{display:block;padding:40px 600px 40px 16px;box-sizing:border-box;}
 
 
 /* VALVE PN BAR */
@@ -3121,7 +3121,7 @@ function applyZoomCenter() {
     if (!cw || !ch) { setTimeout(doCenter, 60); return; }
     var sw = area.scrollWidth, sh = area.scrollHeight;
     // バルブ配列中心をビューポート中央に合わせる
-    var contentCenterX = _svgCenterFx * newW + _SVG_PAD;
+    var contentCenterX = _svgCenterFx * newW + _SVG_PAD_X;
     area.scrollLeft = Math.max(0, contentCenterX - cw/2);
     area.scrollTop  = Math.max(0, (sh - ch) / 2);
   }
@@ -4646,15 +4646,17 @@ function zoomReset() {
 }
 
 // SVG canvas padding (must match .svg-canvas-wrap padding)
-var _SVG_PAD = 600;
+// パディング: 左16/上下40（表示を詰めて左寄せ）・右600（ズーム時のパン用余白）
+var _SVG_PAD_X = 16;   // 左パディング
+var _SVG_PAD_Y = 40;   // 上パディング
 
 function _svgCenter(area, newW, newH) {
   function doCenter() {
     var cw = area.clientWidth, ch = area.clientHeight;
     if (!cw || !ch) { setTimeout(function(){ _svgCenter(area, newW, newH); }, 60); return; }
-    // Use scrollWidth/scrollHeight (actual content size) for reliable centering
-    var sw = area.scrollWidth, sh = area.scrollHeight;
-    area.scrollLeft = Math.max(0, (sw - cw) / 2);
+    // 左端に寄せて表示、縦は中央（余白が少ないので実質そのまま）
+    var sh = area.scrollHeight;
+    area.scrollLeft = 0;
     area.scrollTop  = Math.max(0, (sh - ch) / 2);
   }
   requestAnimationFrame(function() { requestAnimationFrame(function() { setTimeout(doCenter, 20); }); });
@@ -4675,8 +4677,8 @@ function applyZoom(centerOnSVG) {
     var oldW = _svgNatW * (_svgZoom);  // already updated - use pre-zoom
     var cw = area.clientWidth, ch = area.clientHeight;
     // center of viewport in SVG coordinates (SVG starts at _SVG_PAD)
-    var vpCX = area.scrollLeft + cw / 2 - _SVG_PAD;
-    var vpCY = area.scrollTop  + ch / 2 - _SVG_PAD;
+    var vpCX = area.scrollLeft + cw / 2 - _SVG_PAD_X;
+    var vpCY = area.scrollTop  + ch / 2 - _SVG_PAD_Y;
     anchorFx = newW > 0 ? vpCX / newW : 0.5;
     anchorFy = newH > 0 ? vpCY / newH : 0.5;
     anchorPxX = cw / 2;
@@ -4694,8 +4696,8 @@ function applyZoom(centerOnSVG) {
       _svgCenter(area, newW, newH);
     } else {
       requestAnimationFrame(function() {
-        area.scrollLeft = anchorFx * newW - anchorPxX + _SVG_PAD;
-        area.scrollTop  = anchorFy * newH - anchorPxY + _SVG_PAD;
+        area.scrollLeft = anchorFx * newW - anchorPxX + _SVG_PAD_X;
+        area.scrollTop  = anchorFy * newH - anchorPxY + _SVG_PAD_Y;
       });
     }
   }
@@ -4717,8 +4719,8 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!_svgNatW) return;
       var rect  = area.getBoundingClientRect();
       // cursor position relative to SVG origin
-      var curSvgX = e.clientX - rect.left + area.scrollLeft - _SVG_PAD;
-      var curSvgY = e.clientY - rect.top  + area.scrollTop  - _SVG_PAD;
+      var curSvgX = e.clientX - rect.left + area.scrollLeft - _SVG_PAD_X;
+      var curSvgY = e.clientY - rect.top  + area.scrollTop  - _SVG_PAD_Y;
       var oldW = _svgNatW * _svgZoom, oldH = _svgNatH * _svgZoom;
       var fx = oldW > 0 ? curSvgX / oldW : 0.5;
       var fy = oldH > 0 ? curSvgY / oldH : 0.5;
@@ -4732,8 +4734,8 @@ document.addEventListener('DOMContentLoaded', function() {
       if (lbl) lbl.textContent = Math.round(_svgZoom * 100) + '%';
       requestAnimationFrame(function() {
         // keep the point under cursor fixed
-        area.scrollLeft = fx * newW - (e.clientX - rect.left) + _SVG_PAD;
-        area.scrollTop  = fy * newH - (e.clientY - rect.top)  + _SVG_PAD;
+        area.scrollLeft = fx * newW - (e.clientX - rect.left) + _SVG_PAD_X;
+        area.scrollTop  = fy * newH - (e.clientY - rect.top)  + _SVG_PAD_Y;
       });
     }, { passive: false });
 
