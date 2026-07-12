@@ -305,6 +305,38 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
 </head>
 <body>
 
+<!-- ─── 公式仕様書 自動記入モーダル ─── -->
+<div id="official-form-modal" style="display:none;position:fixed;inset:0;z-index:900;background:rgba(10,20,35,.55);align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;width:560px;max-width:92vw;padding:18px 22px;box-shadow:0 12px 40px rgba(0,0,0,.35);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-size:14px;font-weight:800;color:#0d3458;">📝 SMC公式マニホールド仕様書に自動記入</div>
+      <button onclick="closeOfficialFormModal()" style="border:none;background:#f1f5f9;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;padding:3px 9px;color:#475569;">✕ 閉じる</button>
+    </div>
+    <div style="font-size:11px;color:#475569;line-height:1.8;margin-bottom:10px;">
+      SMCサイトからダウンロードした<b>公式のマニホールド仕様書（.xlsx）</b>を下の枠に入れると、
+      現在の選定内容（型式・連ごとのバルブ仕様・オプション○印・構成製品リスト）を<b>公式の書式のまま</b>記入した
+      <b>「記入済_○○.xlsx」</b>がダウンロードされます。元のファイルは変更されません。
+    </div>
+    <div style="background:#f0f7ff;border:1px solid #bcd7f5;border-radius:6px;padding:7px 10px;font-size:10px;color:#1e4e79;margin-bottom:10px;line-height:1.7;">
+      現在の選定: <span id="ofm-current-pn" style="font-family:var(--mono);font-weight:800;">—</span><br>
+      必要なテンプレート: <span id="ofm-need" style="font-weight:700;">—</span>（マニホールドのサイズ・接続タイプが一致するもの）
+    </div>
+    <div id="official-drop-zone"
+      onclick="document.getElementById('official-form-input').click()"
+      style="border:2.5px dashed #0d7a4f;border-radius:10px;background:#f2fbf7;padding:26px 16px;text-align:center;cursor:pointer;transition:all .15s;">
+      <div style="font-size:26px;">📄⬇</div>
+      <div style="font-size:13px;font-weight:800;color:#0d7a4f;margin-top:4px;">ここに公式仕様書 .xlsx をドラッグ＆ドロップ</div>
+      <div style="font-size:10px;color:#4a7a63;margin-top:5px;line-height:1.8;">
+        またはこの枠を<b>クリックしてファイルを選択</b> ／ エクスプローラーでファイルをコピーして <b>Ctrl＋V で貼り付け</b>
+      </div>
+    </div>
+    <div id="ofm-status" style="display:none;margin-top:8px;font-size:11px;font-weight:700;border-radius:6px;padding:7px 10px;"></div>
+    <div style="margin-top:8px;font-size:9px;color:#94a3b8;line-height:1.7;">
+      ※記入されない項目: 貴社名などのご記入欄、右頁の凡例に依存する記号（単独スペーサの継手仕様(T)(U)等）。出力後にExcelでご確認ください。
+    </div>
+  </div>
+</div>
+
 <!-- ─── Protocol popup ─── -->
 <div id="proto-popup" class="proto-popup">
   <div class="proto-popup-hdr">
@@ -332,8 +364,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
   <div class="tb-right">
     <button class="btn-top btn-reset" onclick="resetAll()">⟳ リセット</button>
     <button class="btn-top btn-excel" onclick="exportExcel()">📥 Excel 仕様書</button>
-    <button class="btn-top btn-excel" id="official-form-btn" onclick="document.getElementById('official-form-input').click()"
-      title="SMC公式のマニホールド仕様書Excel（SS5Y□-□□.xlsx）を選択またはこのボタンにドラッグ＆ドロップすると、現在の選定内容を自動記入します"
+    <button class="btn-top btn-excel" id="official-form-btn" onclick="showOfficialFormModal()"
+      title="SMC公式のマニホールド仕様書Excel（SS5Y□-□□.xlsx）に現在の選定内容を自動記入します"
       style="background:#0d7a4f;margin-left:6px;">📝 公式仕様書に記入</button>
     <input type="file" id="official-form-input" accept=".xlsx" style="display:none;" onchange="fillOfficialSpecForm(this.files[0]);this.value='';">
     <button class="btn-top btn-excel" onclick="exportEditorJSON()" style="background:#2c5f8a;margin-left:6px;">📐 回路図JSON</button>
@@ -4704,7 +4736,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (rb) rb.style.display = '';
     }
   } catch(e) {}
-  // 公式仕様書ボタンへの .xlsx ドラッグ＆ドロップ
+  // 公式仕様書: ボタンへの直接D&D（モーダルを開いて記入開始）
   var ofBtn = document.getElementById('official-form-btn');
   if (ofBtn) {
     ofBtn.addEventListener('dragover', function(e){ e.preventDefault(); ofBtn.style.outline = '2px dashed #fff'; });
@@ -4712,8 +4744,33 @@ document.addEventListener('DOMContentLoaded', function() {
     ofBtn.addEventListener('drop', function(e){
       e.preventDefault(); ofBtn.style.outline = '';
       var f = e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) fillOfficialSpecForm(f);
+      if (f) { showOfficialFormModal(); fillOfficialSpecForm(f); }
     });
+  }
+  // 公式仕様書モーダル: ドロップゾーン
+  var ofZone = document.getElementById('official-drop-zone');
+  if (ofZone) {
+    ofZone.addEventListener('dragover', function(e){ e.preventDefault(); ofZone.style.background = '#dcf5ea'; ofZone.style.borderColor = '#0a5c3c'; });
+    ofZone.addEventListener('dragleave', function(){ ofZone.style.background = '#f2fbf7'; ofZone.style.borderColor = '#0d7a4f'; });
+    ofZone.addEventListener('drop', function(e){
+      e.preventDefault(); ofZone.style.background = '#f2fbf7'; ofZone.style.borderColor = '#0d7a4f';
+      var f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) fillOfficialSpecForm(f);
+      else _ofmStatus('ファイルを認識できませんでした。エクスプローラーから .xlsx をドラッグしてください', false);
+    });
+  }
+  // 公式仕様書モーダル: Ctrl+V でファイル貼り付け（エクスプローラーでコピーしたxlsx）
+  document.addEventListener('paste', function(e){
+    var modal = document.getElementById('official-form-modal');
+    if (!modal || modal.style.display === 'none' || !modal.style.display) return;
+    var f = e.clipboardData && e.clipboardData.files && e.clipboardData.files[0];
+    if (f) { e.preventDefault(); fillOfficialSpecForm(f); }
+    else _ofmStatus('クリップボードにファイルがありません。エクスプローラーでxlsxをコピー（Ctrl+C）してから貼り付けてください', false);
+  });
+  // モーダル背景クリックで閉じる
+  var ofModal = document.getElementById('official-form-modal');
+  if (ofModal) {
+    ofModal.addEventListener('click', function(e){ if (e.target === ofModal) closeOfficialFormModal(); });
   }
   var area = document.getElementById('manifold-scroll-area');
   if (area) {
@@ -7290,12 +7347,49 @@ function buildOrderItems() {
     .map(function(pn){ return { pn: pn, qty: agg[pn].count, label: agg[pn].label }; });
 }
 
+// ─── 公式仕様書 モーダル制御 ───
+function showOfficialFormModal() {
+  var m = document.getElementById('official-form-modal');
+  if (!m) return;
+  var res = null;
+  try { res = buildPN(); } catch(e) {}
+  var pnEl = document.getElementById('ofm-current-pn');
+  var needEl = document.getElementById('ofm-need');
+  if (pnEl) pnEl.textContent = res ? res.full : '（選定未完了）';
+  if (needEl) {
+    if (res) {
+      var typeCode = (res.segs.find(function(s){ return s.key === '型式+配線'; }) || {}).val || '';
+      var nm = typeCode.match(/^(M?\d{2}R?)(S6|S3|S4|S5|S8|SW|S|TC|T|FW|F|PG|PH|P|L|M)?/);
+      needEl.textContent = 'SS5Y' + S.series + '-' + (nm ? nm[1] + (nm[2] || '') : typeCode) + ' 用の仕様書';
+    } else {
+      needEl.textContent = '先に選定を完了してください';
+    }
+  }
+  _ofmStatus('', null);
+  m.style.display = 'flex';
+}
+function closeOfficialFormModal() {
+  var m = document.getElementById('official-form-modal');
+  if (m) m.style.display = 'none';
+}
+function _ofmStatus(msg, ok) {
+  var el = document.getElementById('ofm-status');
+  if (!el) return;
+  if (!msg) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.textContent = msg;
+  el.style.background = ok === true ? '#f0fdf4' : ok === false ? '#fef2f2' : '#f8fafc';
+  el.style.border = '1px solid ' + (ok === true ? '#a7f3d0' : ok === false ? '#fecaca' : '#e2e8f0');
+  el.style.color = ok === true ? '#15803d' : ok === false ? '#dc2626' : '#475569';
+}
+
 // ─── 公式仕様書 自動記入 本体 ───
 async function fillOfficialSpecForm(file) {
   try {
     if (!file) return;
     var res = buildPN();
-    if (!res) { alert('先に選定を進めてください（品番が生成されていません）'); return; }
+    if (!res) { _ofmStatus('先に選定を進めてください（品番が生成されていません）', false); alert('先に選定を進めてください（品番が生成されていません）'); return; }
+    _ofmStatus('「' + file.name + '」を解析・記入中…', null);
 
     var buf = new Uint8Array(await file.arrayBuffer());
     var entries = _zipParse(buf);
@@ -7316,6 +7410,7 @@ async function fillOfficialSpecForm(file) {
     if (!tm) { alert('SMC公式マニホールド仕様書（SS5Y□-□□）として認識できませんでした。\nタイトル: ' + (title || '不明')); return; }
     var typeCode = (res.segs.find(function(s){ return s.key === '型式+配線'; }) || {}).val || '';
     if (tm[1] !== S.series || typeCode.indexOf(tm[2]) !== 0) {
+      _ofmStatus('✗ テンプレート不一致: このファイルは SS5Y' + tm[1] + '-' + tm[2] + ' 用です（現在の選定: SS5Y' + S.series + '-' + typeCode + '）', false);
       alert('テンプレートと選定内容が一致しません。\n・テンプレート: SS5Y' + tm[1] + '-' + tm[2]
         + '\n・現在の選定: SS5Y' + S.series + '-' + typeCode
         + '\n\n該当するサイズ・接続タイプの仕様書ファイルを指定してください。');
@@ -7502,12 +7597,14 @@ async function fillOfficialSpecForm(file) {
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
 
+    _ofmStatus('✓ 記入完了 — 「記入済_' + file.name + '」をダウンロードしました（' + refs.length + 'セル記入）', true);
     alert('公式仕様書に自動記入しました（' + refs.length + 'セル）。\n'
       + '・マニホールド型式ボックス: ' + filledPnBoxes + '箇所\n'
       + '・仕様欄（連別）: ' + stationWrites + '連分\n'
       + '・構成製品リスト: ' + listFilled + '行\n\n'
       + '※貴社名等のご記入欄・右頁凡例に依存する記号（(T)(U)継手仕様等）は記入していません。開いて内容をご確認ください。');
   } catch (e) {
+    _ofmStatus('✗ 自動記入に失敗しました: ' + e.message, false);
     alert('自動記入に失敗しました: ' + e.message);
   }
 }
