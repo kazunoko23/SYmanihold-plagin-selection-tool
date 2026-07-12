@@ -165,7 +165,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
 /* CANVAS */
 .manifold-scroll{flex:1;overflow:auto;background:#d8eaf8;position:relative;cursor:grab;user-select:none;}
 .manifold-scroll.panning{cursor:grabbing;}
-.svg-canvas-wrap{display:block;padding:40px 600px 40px 16px;box-sizing:border-box;}
+.svg-canvas-wrap{display:block;padding:600px;box-sizing:border-box;}
 
 
 /* VALVE PN BAR */
@@ -3119,11 +3119,9 @@ function applyZoomCenter() {
   function doCenter() {
     var cw = area.clientWidth, ch = area.clientHeight;
     if (!cw || !ch) { setTimeout(doCenter, 60); return; }
-    var sw = area.scrollWidth, sh = area.scrollHeight;
-    // バルブ配列中心をビューポート中央に合わせる
-    var contentCenterX = _svgCenterFx * newW + _SVG_PAD_X;
-    area.scrollLeft = Math.max(0, contentCenterX - cw/2);
-    area.scrollTop  = Math.max(0, (sh - ch) / 2);
+    // 初期表示と同じ「左寄せ＋縦中央」に合わせる（連数変更やズームリセットで中央に飛ばない）
+    area.scrollLeft = Math.max(0, _SVG_PAD_X - _SVG_LEFT_MARGIN);
+    area.scrollTop  = Math.max(0, _SVG_PAD_Y + newH / 2 - ch / 2);
   }
   requestAnimationFrame(function(){ requestAnimationFrame(function(){ setTimeout(doCenter, 20); }); });
 }
@@ -4646,18 +4644,20 @@ function zoomReset() {
 }
 
 // SVG canvas padding (must match .svg-canvas-wrap padding)
-// パディング: 左16/上下40（表示を詰めて左寄せ）・右600（ズーム時のパン用余白）
-var _SVG_PAD_X = 16;   // 左パディング
-var _SVG_PAD_Y = 40;   // 上パディング
+// パディングは全周600px（自由にパン/ズームできる作業領域）。
+// 「左上に固定」ではなく、初期スクロール位置で「左寄せ＋縦中央」に見せる方式。
+var _SVG_PAD_X = 600;       // 左パディング
+var _SVG_PAD_Y = 600;       // 上パディング
+var _SVG_LEFT_MARGIN = 24;  // 初期表示時に左端へ残す見た目の余白
 
 function _svgCenter(area, newW, newH) {
   function doCenter() {
     var cw = area.clientWidth, ch = area.clientHeight;
     if (!cw || !ch) { setTimeout(function(){ _svgCenter(area, newW, newH); }, 60); return; }
-    // 左端に寄せて表示、縦は中央（余白が少ないので実質そのまま）
-    var sh = area.scrollHeight;
-    area.scrollLeft = 0;
-    area.scrollTop  = Math.max(0, (sh - ch) / 2);
+    // 横: コンテンツ左端が画面左から _SVG_LEFT_MARGIN の位置に来るように
+    // 縦: コンテンツ中心がビューポート中央に来るように（パンは全方向可能なまま）
+    area.scrollLeft = Math.max(0, _SVG_PAD_X - _SVG_LEFT_MARGIN);
+    area.scrollTop  = Math.max(0, _SVG_PAD_Y + newH / 2 - ch / 2);
   }
   requestAnimationFrame(function() { requestAnimationFrame(function() { setTimeout(doCenter, 20); }); });
 }
