@@ -6285,10 +6285,18 @@ function renderSVG(noRecenter) {
   var END_W  = 28;
   var SI_W   = 50;
 
+  // 配線方式に応じた左端ブロック（I/Oユニット付きシリアル伝送は増設分の幅を確保）
+  var _ioCount = 0;
+  if (S.wiring === 'ex600') _ioCount = (S.ex600IoUnits || []).length;
+  else if (S.wiring === 'ex245' && S.ex245IoMod === 'Y') _ioCount = parseInt(S.ex245Io || '0', 10) || 0;
+  else if (S.wiring === 'ex250') _ioCount = parseInt(S.ex250Io || '0', 10) || 0;
+  _ioCount = Math.min(_ioCount, 9);
+  var IO_W = _ioCount > 0 ? _ioCount * 11 + 4 : 0;
+
   var totalVW = n * VW;
   var BW = END_W + totalVW + END_W;
 
-  var ML = 20 + SI_W + 14;
+  var ML = 20 + IO_W + SI_W + 14;
   var MR = 60;
   var W  = Math.max(560, ML + BW + MR);
   var BX = ML;
@@ -6393,14 +6401,79 @@ function renderSVG(noRecenter) {
   // ══════════════════════════════════
   //  VIEW 1: 上面図（続き）
 
-  // SI unit (left)
+  // ── 左端ブロック（配線方式に応じて表示を変える）──
   var siX = BX - 14 - SI_W;
   var siH = SOL_H + BODY_H + BASE_H;
-  p.push(R(siX, SOL_Y, SI_W, siH, 3, C.si, C.siBdr, 1));
-  p.push(R(siX+SI_W, SOL_Y+10, 14, siH-20, 0, C.siBdr));
-  p.push(Tx(siX+SI_W/2, SOL_Y+siH/2, 'SI', 7, '#7aaac8'));
-  p.push(Tx(siX+SI_W/2, SOL_Y+siH/2+10, 'UNIT', 5.5, '#5a8aac'));
-  p.push(L(siX+SI_W, SOL_Y+siH/2, BX, SOL_Y+siH/2, C.siBdr, 1, '3,2'));
+  (function drawWiringBlock() {
+    var cx = siX + SI_W / 2;
+    var cy = SOL_Y + siH / 2;
+    function block(fill, bdr) {
+      p.push(R(siX, SOL_Y, SI_W, siH, 3, fill, bdr, 1));
+      p.push(R(siX + SI_W, SOL_Y + 10, 14, siH - 20, 0, bdr));
+      p.push(L(siX + SI_W, cy, BX, cy, bdr, 1, '3,2'));
+    }
+    function lbl3(l1, l2, l3, col1, col2) {
+      p.push(Tx(cx, cy - 8, l1, 7.5, col1));
+      if (l2) p.push(Tx(cx, cy + 3, l2, 6, col2));
+      if (l3) p.push(Tx(cx, cy + 13, l3, 5.5, col2));
+    }
+    var w = S.wiring;
+    var SERIAL_NAMES = { ex600:'EX600', ex245:'EX245', ex250:'EX250', ex260:'EX260', ex126:'EX126', ex120:'EX120', ex180:'EX180', ex500:'EX500', ex510:'EX510' };
+    if (SERIAL_NAMES[w]) {
+      // シリアル伝送: SIユニット＋（EX600/245/250はI/Oユニット増設分）
+      var siCode = w === 'ex600' ? (S.ex600Si === '0' ? 'SIなし' : 'S6' + (S.ex600Si || '') + (S.ex600Io || ''))
+                 : w === 'ex245' ? (S.ex245Si === '0' ? 'SIなし' : 'S' + (S.ex245Si || ''))
+                 : w === 'ex250' ? (S.ex250Si === '0' ? 'SIなし' : 'S' + (S.ex250Si || '') + (S.ex250Io || '') + (S.ex250Spec || ''))
+                 : w === 'ex260' ? (S.ex260Si === '0' ? 'SIなし' : 'S' + (S.ex260Si || ''))
+                 : w === 'ex126' ? (S.ex126Si === '0' ? 'SIなし' : 'S4' + (S.ex126Si || ''))
+                 : w === 'ex120' ? (S.ex120Si === '0' ? 'SIなし' : 'S3' + (S.ex120Si || ''))
+                 : w === 'ex180' ? (S.ex180Si === '0' ? 'SIなし' : 'S8' + (S.ex180Si || '') + (S.ex180PolarSel || ''))
+                 : w === 'ex500' ? 'S' + (S.ex500Si || '') : 'S5' + (S.ex510N || '') + (S.ex510S || '');
+      var isSafety = (w === 'ex600' && S.ex600Si === 'EP') || (w === 'ex260' && (S.ex260Si === 'FPN' || S.ex260Si === 'DPN'));
+      block(C.si, isSafety ? '#c0392b' : C.siBdr);
+      lbl3(SERIAL_NAMES[w], siCode, isSafety ? 'SAFETY' : (w === 'ex500' || w === 'ex510' ? 'G/W' : 'SI UNIT'),
+           '#8fc4e8', isSafety ? '#e8a09a' : '#5a8aac');
+      // 通信コネクタ（上部に丸）
+      p.push(Ci(cx, SOL_Y + 8, 3.5, '#0c1c30', '#5a8aac', 1));
+      // I/Oユニット増設モジュール（SIユニットの左に連数分）
+      if (_ioCount > 0) {
+        for (var ii = 0; ii < _ioCount; ii++) {
+          var ix = siX - IO_W + ii * 11 + 2;
+          p.push(R(ix, SOL_Y + 4, 9, siH - 8, 1, '#1e3a5c', '#35608c', 0.8));
+          p.push(Ci(ix + 4.5, SOL_Y + 14, 2, '#0c1c30', '#4a7aa8', 0.7));
+          p.push(Ci(ix + 4.5, SOL_Y + 24, 2, '#0c1c30', '#4a7aa8', 0.7));
+        }
+        p.push(JTx(siX - IO_W / 2, SOL_Y - 4, 'I/Oユニット×' + _ioCount, 5.5, C.sub));
+      }
+    } else if (w === 'dsub' || w === 'flat') {
+      var poles = w === 'dsub' ? '25P' : ({ P: '26P', PG: '20P', PH: '10P' }[S.connType] || '');
+      block('#24404f', '#3a7a8c');
+      lbl3(w === 'dsub' ? 'D-sub' : 'FLAT', (S.connType || '') + ' ' + poles,
+           S.connDir === '1' ? 'コネクタ↑' : S.connDir === '2' ? 'コネクタ←' : '', '#8fd4dc', '#6aa8b4');
+      // コネクタ形状（台形）
+      p.push('<path d="M ' + (cx - 12) + ' ' + (SOL_Y + 6) + ' h24 l-4 7 h-16 z" fill="#0e2430" stroke="#3a7a8c" stroke-width="0.8"/>');
+    } else if (w === 'term_sp' || w === 'term') {
+      block('#3a3a4a', '#6a6a80');
+      lbl3('端子台', w === 'term_sp' ? 'TC スプリング式' : 'T ねじ式', '', '#c0c0d4', '#9090a8');
+      for (var ti = 0; ti < 4; ti++) p.push(Ci(cx - 15 + ti * 10, SOL_Y + 10, 2.2, '#202030', '#8a8aa0', 0.8));
+    } else if (w === 'lead') {
+      block('#37474f', '#607d8b');
+      lbl3('リード線', 'L' + (S.leadNum || '') + (S.leadLen || ''),
+           ({ '1': '34芯', '2': '17芯', '3': '9芯' }[S.leadNum] || ''), '#b0cfda', '#84a8b8');
+      for (var li2 = 0; li2 < 3; li2++) p.push(L(siX - 10, SOL_Y + 8 + li2 * 5, siX, SOL_Y + 10 + li2 * 5, '#84a8b8', 1));
+    } else if (w === 'wireless') {
+      block('#3a2a50', '#7a5aa8');
+      lbl3('無線', 'EXW1 S' + (S.wirelessType || 'W□'), 'REMOTE', '#c8aef0', '#9a7ac8');
+      p.push(Ci(cx, SOL_Y + 9, 2, '#c8aef0'));
+      p.push('<path d="M ' + (cx - 6) + ' ' + (SOL_Y + 6) + ' a8 8 0 0 1 12 0" fill="none" stroke="#9a7ac8" stroke-width="1"/>');
+    } else if (w === 'multi') {
+      block('#2c4a42', '#4a8a76');
+      lbl3('マルチ', 'コネクタ M', '', '#a0d8c4', '#6aa890');
+    } else {
+      block(C.si, C.siBdr);
+      lbl3('配線部', '', '', '#7aaac8', '#5a8aac');
+    }
+  })();
 
   // solenoid strip - valves area only (not over end plates)
   p.push(R(VX0, SOL_Y, totalVW, SOL_H, 0, C.sol));
