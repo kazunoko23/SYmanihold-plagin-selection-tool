@@ -7360,7 +7360,14 @@ function showOfficialFormModal() {
     if (res) {
       var typeCode = (res.segs.find(function(s){ return s.key === '型式+配線'; }) || {}).val || '';
       var nm = typeCode.match(/^(M?\d{2}R?)(S6|S3|S4|S5|S8|SW|S|TC|T|FW|F|PG|PH|P|L|M)?/);
-      needEl.textContent = 'SS5Y' + S.series + '-' + (nm ? nm[1] + (nm[2] || '') : typeCode) + ' 用の仕様書';
+      var baseName = S.base === 'conn' ? 'コネクタ接続ベース' : S.base === 'metal' ? '金属ベース' : S.base === 'mixed' ? '混合取付ベース' : '—';
+      var wDefOfm = WIRING_DEFS.find(function(x){ return x.id === S.wiring; });
+      needEl.innerHTML = 'SS5Y' + S.series + '-' + (nm ? nm[1] + (nm[2] || '') : typeCode) + ' 用の仕様書<br>'
+        + '<span style="font-weight:400;">'
+        + '① サイズ: <b>SY' + S.series + '000</b>'
+        + '　② ベース: <b>' + baseName + '</b>'
+        + '　③ 配線仕様: <b>' + (wDefOfm ? wDefOfm.name : '—') + '</b>'
+        + '</span>';
     } else {
       needEl.textContent = '先に選定を完了してください';
     }
