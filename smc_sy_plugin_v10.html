@@ -165,7 +165,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
 /* CANVAS */
 .manifold-scroll{flex:1;overflow:auto;background:#d8eaf8;position:relative;cursor:grab;user-select:none;}
 .manifold-scroll.panning{cursor:grabbing;}
-.svg-canvas-wrap{display:block;padding:600px;box-sizing:border-box;}
+.svg-canvas-wrap{display:block;width:max-content;padding:120px 300px;box-sizing:border-box;}
 
 
 /* VALVE PN BAR */
@@ -4670,8 +4670,8 @@ function zoomReset() {
 // SVG canvas padding (must match .svg-canvas-wrap padding)
 // パディングは全周600px（自由にパン/ズームできる作業領域）。
 // 「左上に固定」ではなく、初期スクロール位置で「左寄せ＋縦中央」に見せる方式。
-var _SVG_PAD_X = 600;       // 左パディング
-var _SVG_PAD_Y = 600;       // 上パディング
+var _SVG_PAD_X = 300;       // 左パディング（.svg-canvas-wrap paddingと一致させること）
+var _SVG_PAD_Y = 120;       // 上パディング（同上・縦は無駄スクロール防止のため小さめ）
 var _SVG_LEFT_MARGIN = 8;   // 初期表示時に左端へ残す見た目の余白
 
 function _svgCenter(area, newW, newH) {
@@ -6313,7 +6313,7 @@ function renderSVG(noRecenter) {
   var V1_H   = SOL_H + BODY_H + BASE_H + PORT_H;
 
   // view2 (front/D-side view)
-  var GAP_V  = 34;
+  var GAP_V  = 48;  // 上面図と正面図の間隔（DINレール表記が正面図ラベルと重ならない高さ）
   var V2_TOP = V1_TOP + V1_H + GAP_V;
   var ROW_H  = 24;
   var FBASE_H= 16;
