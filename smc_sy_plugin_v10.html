@@ -765,7 +765,11 @@ const S = {
   mountDinLen: null, // null|'BA'|'0'|'3'...'24'
   bulkSpec: null,    // bulk edit spec
   // マニホールドオプション選択（Step 10）
-  manifestOpts: {},  // { optKey: count }
+  // manifestOptsはマニホールド付属品（silencer/plug/nameplate）のみ。
+  // 位置依存部品はバルブ側（valveSpecs[].manifoldOpt）で連を指定して選択する。
+  manifestOpts: {},   // { optKey: count }
+  silencerSide: null, // 'U'|'D'|'B' — サイレンサ装着側（P,E取出位置と整合させる）
+  plugTarget: null,   // 'ab'|'pe' — プラグ対象ポート（口径→品番自動選定）
 };
 
 // ════════════════════════════════════════════════════
@@ -5410,6 +5414,53 @@ function getOptionCompatKey() {
   return bk + '_' + tk + '_' + S.series;
 }
 
+// ─── マニホールドレベルで数量選択できるオプション（位置不要 or 側選択で足りるもの）───
+// それ以外の位置依存部品（スロット占有・スペーサ・減圧弁・ブロッキングディスク）は
+// バルブ側（連クリック→オプションタブ）に一本化し、装着位置を必ず持たせる。
+var MANIFOLD_LEVEL_OPTS = ['silencer', 'plug', 'nameplate'];
+
+// サイレンサ（ワンタッチ継手接続タイプ・3/5(E)ポート用）品番 — カタログp.625
+function getSilencerPN() {
+  var m = { '3':'AN15-C08', '5':'AN20-C10', '7':'AN30-C12' };
+  return m[S.series] || '—';
+}
+
+// プラグ品番（KQ2P/KJP・カタログp.625寸法表）— 対象ポートの口径から自動選定
+function getPlugPN(target) {
+  var mm = { '2':'KJP-02', '3':'KQ2P-23', '4':'KQ2P-04', '6':'KQ2P-06', '8':'KQ2P-08', '10':'KQ2P-10', '12':'KQ2P-12' };
+  var inch = { 'N1':'KQ2P-01', 'N3':'KQ2P-03', 'N7':'KQ2P-07', 'N9':'KQ2P-09', 'N11':'KQ2P-11' };
+  if (target === 'pe') {
+    var pe = { '3':'8', '5':'10', '7':'12' }[S.series];
+    return pe ? mm[pe] : '—';
+  }
+  var code = S.abCode || '';
+  var mMil = code.match(/^[CLB](\d+)$/);
+  if (mMil) return mm[mMil[1]] || '—';
+  var mIn = code.match(/^(?:L|B)?(N\d+)$/);
+  if (mIn) return inch[mIn[1]] || '—';
+  return '—';
+}
+
+// バルブ側で装着済みのオプション数（Step10の一覧表示用）
+function countAssignedOpt(key) {
+  var c = 0;
+  for (var i = 0; i < (S.valveCount || 0); i++) {
+    var o = getValveSpec(i).manifoldOpt || {};
+    if (o.slot === key) c++;
+    if (key === 'sup_spacer' && o.supSpacerPipe) c++;
+    if (key === 'exh_spacer' && o.exhSpacerPipe) c++;
+    if (key === 'residual_stop' && o.residualStop) c++;
+    if (key === 'residual_perf' && o.residualPerf) c++;
+    if (key === 'reduc_valve' && o.reducValve && o.reducValve.gauge) c++;
+    if (key === 'backpress_assy' && o.backpressAssy) c++;
+    if (key === 'blocking_disc') { if (o.blockingDiscSup) c++; if (o.blockingDiscExh) c++; }
+  }
+  return c;
+}
+
+function setSilencerSide(v) { S.silencerSide = v; renderManifoldOptions(); updatePN(); }
+function setPlugTarget(v)   { S.plugTarget = v;   renderManifoldOptions(); updatePN(); }
+
 function renderManifoldOptions() {
   var el = document.getElementById('manifold-opt-body');
   if (!el) return;
@@ -5453,62 +5504,105 @@ function renderManifoldOptions() {
           + '</div>';
   }
 
-  // ── スロット使用オプション ──
-  if (slotOpts.length > 0) {
-    html += '<div class="ve-sttl">バルブスロット使用オプション <span style="font-size:8px;font-weight:400;color:#94a3b8;">（1連分の枠を使用）</span></div>';
-    html += '<div style="display:flex;flex-direction:column;gap:4px;">';
-    slotOpts.forEach(function(k) {
+  // カウンタ数量ヘルパー
+  function stepper(k, cnt) {
+    return '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
+      + '<div onclick="setManifestOpt(\'' + k + '\',' + Math.max(0,cnt-1) + ')" style="width:22px;height:22px;border:1.5px solid var(--border);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--sub);">−</div>'
+      + '<div style="min-width:24px;text-align:center;font-family:var(--mono);font-size:13px;font-weight:800;color:' + (cnt>0?'var(--blue)':'#94a3b8') + ';">' + cnt + '</div>'
+      + '<div onclick="setManifestOpt(\'' + k + '\',' + (cnt+1) + ')" style="width:22px;height:22px;border:1.5px solid var(--border);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--sub);">＋</div>'
+      + '</div>';
+  }
+  function chipRow(items, curVal, fnName) {
+    return '<div style="display:flex;gap:3px;margin-top:4px;">' + items.map(function(it){
+      var sel = curVal === it.v;
+      return '<div onclick="' + fnName + '(\'' + it.v + '\')" style="flex:1;text-align:center;border:1.5px solid ' + (sel?'var(--blue)':'var(--border)') + ';border-radius:5px;padding:4px 2px;cursor:pointer;background:' + (sel?'#ebf3ff':'#fff') + ';font-size:9px;font-weight:700;color:' + (sel?'var(--blue)':'var(--sub)') + ';">' + it.l + '</div>';
+    }).join('') + '</div>';
+  }
+
+  // ── サイレンサ（3/5(E)ポート・ワンタッチ取付）──
+  if (avail.indexOf('silencer') >= 0) {
+    var silCnt = S.manifestOpts['silencer'] || 0;
+    var eportPos = document.getElementById('sel-eport') ? document.getElementById('sel-eport').value : 'U';
+    var silWarn = '';
+    if (silCnt > 0 && S.silencerSide && S.silencerSide !== 'B' && eportPos !== 'B' && S.silencerSide !== eportPos) {
+      silWarn = '<div style="font-size:8px;color:#dc2626;font-weight:700;margin-top:3px;">⚠ P,Eポート取出位置（' + eportPos + '側）と装着側が一致していません</div>';
+    }
+    html += '<div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:#fff;margin-bottom:5px;">'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;">'
+      + '<div style="flex:1;">'
+      + '<div style="font-size:11px;font-weight:700;color:var(--text);">サイレンサ（WT継手接続型）</div>'
+      + '<div style="font-size:8px;color:#94a3b8;">3/5(E)ポートにワンタッチ取付 — 品番 <span style="font-family:var(--mono);color:#7c3aed;font-weight:700;">' + getSilencerPN() + '</span></div>'
+      + '</div>' + stepper('silencer', silCnt) + '</div>'
+      + (silCnt > 0
+        ? '<div style="font-size:8px;color:#64748b;margin-top:4px;">装着側（P,Eポート取出位置に合わせる）</div>'
+          + chipRow([{v:'U',l:'U側'},{v:'D',l:'D側'},{v:'B',l:'両側'}], S.silencerSide, 'setSilencerSide') + silWarn
+        : '')
+      + '</div>';
+  }
+
+  // ── プラグ（未使用ポートの閉塞）──
+  if (avail.indexOf('plug') >= 0) {
+    var plugCnt = S.manifestOpts['plug'] || 0;
+    var plugPN = S.plugTarget ? getPlugPN(S.plugTarget) : '対象ポート選択で品番表示';
+    html += '<div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:#fff;margin-bottom:5px;">'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;">'
+      + '<div style="flex:1;">'
+      + '<div style="font-size:11px;font-weight:700;color:var(--text);">プラグ</div>'
+      + '<div style="font-size:8px;color:#94a3b8;">未使用ポートの閉塞 — <span style="font-family:var(--mono);color:#7c3aed;font-weight:700;">' + plugPN + '</span></div>'
+      + '</div>' + stepper('plug', plugCnt) + '</div>'
+      + (plugCnt > 0
+        ? '<div style="font-size:8px;color:#64748b;margin-top:4px;">対象ポート（口径から品番を自動選定）</div>'
+          + chipRow([{v:'ab',l:'A,Bポート（' + (S.abCode||'口径未選択') + '）'},{v:'pe',l:'P,Eポート'}], S.plugTarget, 'setPlugTarget')
+        : '')
+      + '</div>';
+  }
+
+  // ── 銘板プレート（位置指定不要）──
+  if (avail.indexOf('nameplate') >= 0) {
+    var npCnt = S.manifestOpts['nameplate'] || 0;
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:#fff;margin-bottom:5px;">'
+      + '<div style="flex:1;">'
+      + '<div style="font-size:11px;font-weight:700;color:var(--text);">銘板プレート</div>'
+      + '<div style="font-size:8px;color:#94a3b8;">識別用銘板（取付方法オプションA□/B□/AA/BAで指定する場合は不要）</div>'
+      + '</div>' + stepper('nameplate', npCnt) + '</div>';
+  }
+
+  // ── 位置依存部品の案内（バルブ側で装着位置を指定）──
+  var posOpts = avail.filter(function(k){
+    return MANIFOLD_LEVEL_OPTS.indexOf(k) < 0 && k !== 'backpress_assy' && OPTION_DEFS[k];
+  });
+  if (posOpts.length > 0) {
+    html += '<div class="ve-sttl" style="margin-top:8px;">装着位置が必要なオプション <span style="font-size:8px;font-weight:400;color:#94a3b8;">（バルブをクリック → オプションタブで連を指定）</span></div>';
+    html += '<div style="display:flex;flex-direction:column;gap:3px;">';
+    posOpts.forEach(function(k) {
       var def = OPTION_DEFS[k];
-      var cnt = S.manifestOpts[k] || 0;
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:#fff;">'
+      var assigned = countAssignedOpt(k);
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;border:1px dashed var(--border);border-radius:6px;padding:5px 10px;background:#fafcff;">'
         + '<div style="flex:1;">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--text);">' + def.label + '</div>'
-        + '<div style="font-size:8px;color:#94a3b8;">' + def.note + ' <span style="font-family:var(--mono);color:#7c3aed;">' + def.pnCode + '</span></div>'
+        + '<div style="font-size:10px;font-weight:700;color:var(--text);">' + def.label
+        + (def.type==='slot' ? ' <span style="font-size:7px;color:#94a3b8;">1連占有</span>' : '') + '</div>'
+        + '<div style="font-size:8px;color:#94a3b8;">' + def.note + '</div>'
         + '</div>'
-        + '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
-        + '<div onclick="setManifestOpt(\'' + k + '\',' + Math.max(0,cnt-1) + ')" style="width:22px;height:22px;border:1.5px solid var(--border);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--sub);">−</div>'
-        + '<div style="min-width:24px;text-align:center;font-family:var(--mono);font-size:13px;font-weight:800;color:' + (cnt>0?'var(--blue)':'#94a3b8') + ';">' + cnt + '</div>'
-        + '<div onclick="setManifestOpt(\'' + k + '\',' + (cnt+1) + ')" style="width:22px;height:22px;border:1.5px solid var(--border);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--sub);">＋</div>'
-        + '</div>'
+        + (assigned > 0
+          ? '<span style="font-size:9px;font-weight:800;color:#15803d;background:#f0fdf4;border-radius:8px;padding:2px 8px;">✓ ' + assigned + '箇所 装着済</span>'
+          : '<span style="font-size:8px;color:#94a3b8;">未使用</span>')
         + '</div>';
     });
     html += '</div>';
+    html += '<div style="font-size:8px;color:#64748b;margin-top:4px;">※これらは装着する連（位置）が機能上必要なため、中央のマニホールド図でバルブをクリックし「オプション」タブから選択してください。装着位置はExcelの「マニホールド仕様書」シートに反映されます。</div>';
   }
 
-  // ── 付属オプション ──
-  if (attachOpts.length > 0) {
-    html += '<div class="ve-sttl" style="margin-top:8px;">付属オプション <span style="font-size:8px;font-weight:400;color:#94a3b8;">（スロット不要・個数指定）</span></div>';
-    html += '<div style="display:flex;flex-direction:column;gap:4px;">';
-    attachOpts.forEach(function(k) {
-      var def = OPTION_DEFS[k];
-      var cnt = S.manifestOpts[k] || 0;
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:#fff;">'
-        + '<div style="flex:1;">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--text);">' + def.label + '</div>'
-        + '<div style="font-size:8px;color:#94a3b8;">' + def.note + (def.pnCode!=='—'?' <span style="font-family:var(--mono);color:#7c3aed;">' + def.pnCode + '</span>':'') + '</div>'
-        + '</div>'
-        + '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
-        + '<div onclick="setManifestOpt(\'' + k + '\',' + Math.max(0,cnt-1) + ')" style="width:22px;height:22px;border:1.5px solid var(--border);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--sub);">−</div>'
-        + '<div style="min-width:24px;text-align:center;font-family:var(--mono);font-size:13px;font-weight:800;color:' + (cnt>0?'var(--blue)':'#94a3b8') + ';">' + cnt + '</div>'
-        + '<div onclick="setManifestOpt(\'' + k + '\',' + (cnt+1) + ')" style="width:22px;height:22px;border:1.5px solid var(--border);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--sub);">＋</div>'
-        + '</div>'
-        + '</div>';
-    });
-    html += '</div>';
-  }
-
-  // 選択中オプションサマリー
-  var selected = Object.keys(S.manifestOpts).filter(function(k){ return S.manifestOpts[k] > 0; });
+  // 選択中オプションサマリー（マニホールドレベル分のみ）
+  var selected = MANIFOLD_LEVEL_OPTS.filter(function(k){ return (S.manifestOpts[k]||0) > 0; });
   if (selected.length > 0) {
     html += '<div style="margin-top:8px;background:#f0fdf4;border:1px solid #a7f3d0;border-radius:5px;padding:8px 10px;font-size:9px;color:#064e3b;line-height:1.8;">';
-    html += '<div style="font-weight:700;margin-bottom:2px;">✓ 選択中オプション</div>';
+    html += '<div style="font-weight:700;margin-bottom:2px;">✓ 選択中（マニホールド付属品）</div>';
     selected.forEach(function(k) {
       var def = OPTION_DEFS[k];
-      if (def) html += def.label + ' × ' + S.manifestOpts[k] + '個<br>';
+      var pos = k==='silencer' ? (S.silencerSide ? '（' + ({U:'U側',D:'D側',B:'両側'}[S.silencerSide]) + '）' : '（側未選択⚠）')
+              : k==='plug' ? (S.plugTarget ? '（' + (S.plugTarget==='ab'?'A,B':'P,E') + 'ポート）' : '（対象未選択⚠）') : '';
+      if (def) html += def.label + pos + ' × ' + S.manifestOpts[k] + '個<br>';
     });
-    // スロット数合計
-    var totalSlots = slotOpts.reduce(function(s,k){ return s + (S.manifestOpts[k]||0); }, 0);
-    if (totalSlots > 0) html += '<span style="color:#15803d;font-weight:600;">スロット使用合計: ' + totalSlots + '連分</span>';
     html += '</div>';
   }
 
@@ -5517,8 +5611,8 @@ function renderManifoldOptions() {
   // sv10 更新
   var sv10 = document.getElementById('sv10');
   if (sv10) {
-    var totalSel = Object.values(S.manifestOpts).reduce(function(a,b){ return a + b; }, 0);
-    sv10.textContent = totalSel > 0 ? totalSel + '種選択中' : '—';
+    var totalSel = MANIFOLD_LEVEL_OPTS.reduce(function(a,k){ return a + (S.manifestOpts[k]||0); }, 0);
+    sv10.textContent = totalSel > 0 ? totalSel + '個選択中' : '—';
   }
 }
 
@@ -6572,20 +6666,25 @@ function exportExcel() {
     }
   }
 
-  // ─ マニホールド全体オプション（manifestOpts）
+  // ─ マニホールド付属品（サイレンサ/プラグ/銘板 — 位置依存部品はバルブ側で計上済み）
+  function manifoldAccPN(k) {
+    if (k === 'silencer') return getSilencerPN();
+    if (k === 'plug') return getPlugPN(S.plugTarget || 'ab');
+    return getOptPN(k, series, {});
+  }
+  function manifoldAccLabel(k) {
+    var def = OPTION_DEFS[k];
+    var base = def ? def.label : k;
+    if (k === 'silencer') return base + (S.silencerSide ? '（' + ({U:'U側',D:'D側',B:'両側'}[S.silencerSide]) + ' Eポート）' : '（装着側未選択）');
+    if (k === 'plug') return base + (S.plugTarget ? '（' + (S.plugTarget==='ab'?'A,B':'P,E') + 'ポート用）' : '（対象未選択）');
+    return base;
+  }
   var mopts = S.manifestOpts || {};
-  var optDefKeys = Object.keys(mopts);
-  if (optDefKeys.length > 0) {
+  var accKeys = MANIFOLD_LEVEL_OPTS.filter(function(k){ return (mopts[k]||0) > 0; });
+  if (accKeys.length > 0) {
     bom.push(['', '', '', '']); // 空行
-    optDefKeys.forEach(function(k) {
-      var cnt = mopts[k];
-      if (!cnt || cnt <= 0) return;
-      var def = OPTION_DEFS[k];
-      var label = def ? def.label : k;
-      var pn = getOptPN(k, series, {});
-      for (var c = 0; c < cnt; c++) {
-        bom.push(['マニホールドオプション', '', pn, label]);
-      }
+    accKeys.forEach(function(k) {
+      bom.push(['マニホールド付属品', '×' + mopts[k], manifoldAccPN(k), manifoldAccLabel(k)]);
     });
   }
 
@@ -6649,6 +6748,18 @@ function exportExcel() {
     if (gopt.blockingDiscExh) optNames.push('EXHブロッキングディスク');
     grid.push([(gi+1) + '連目', pnCell, typeCell, wireCell, solCell, optNames.join(' / '), '']);
   }
+  // マニホールド付属品（装着位置つき）
+  var gAcc = MANIFOLD_LEVEL_OPTS.filter(function(k){ return (S.manifestOpts[k]||0) > 0; });
+  if (gAcc.length > 0) {
+    grid.push(['']);
+    grid.push(['マニホールド付属品', '品番', '装着位置', '数量']);
+    gAcc.forEach(function(k){
+      var posLabel = k==='silencer' ? (S.silencerSide ? ({U:'U側',D:'D側',B:'両側'}[S.silencerSide]) + ' 3/5(E)ポート' : '⚠側未選択')
+                   : k==='plug' ? (S.plugTarget ? (S.plugTarget==='ab'?'A,Bポート':'P,Eポート') : '⚠対象未選択')
+                   : '—';
+      grid.push([(OPTION_DEFS[k]||{}).label || k, manifoldAccPN(k), posLabel, S.manifestOpts[k]]);
+    });
+  }
   grid.push(['']);
   grid.push(['※ 配列指定（シングル配線指示位置には2位置ダブル・3位置・4位置バルブ使用不可）はこの表を仕様書としてSMCへ指示。']);
   grid.push(['※ バルブ連数はD側から1連目。ブランキングプレートAss\'yの数も連数に含む。']);
@@ -6687,11 +6798,11 @@ function exportExcel() {
   if (S.wiring === 'ex600' && S.ex600IoUnits) {
     S.ex600IoUnits.forEach(function(iopn){ aggAdd(iopn, 'EX600 I/Oユニット'); });
   }
-  Object.keys(S.manifestOpts||{}).forEach(function(k){
-    var cnt = S.manifestOpts[k];
+  MANIFOLD_LEVEL_OPTS.forEach(function(k){
+    var cnt = (S.manifestOpts||{})[k];
     if (!cnt || cnt <= 0) return;
-    var mp = getOptPN(k, series, {});
-    for (var c = 0; c < cnt; c++) aggAdd(mp, (OPTION_DEFS[k]||{}).label || k);
+    var mp = manifoldAccPN(k);
+    for (var c = 0; c < cnt; c++) aggAdd(mp, manifoldAccLabel(k));
   });
   var order = [
     ['手配品番（カタログ手配例形式・＊＝組込み記号）'],
@@ -6781,7 +6892,7 @@ function exportEditorJSON() {
 function resetAll() {
   _valveEverClicked = false;
   _touchedValves = new Set();
-  Object.assign(S, {series:null,base:null,pipe:null,wiring:null,connType:null,connDir:null,leadNum:null,leadLen:null,wirelessType:null,wirelessNum:null,wirelessPnp:false,ex500Si:null,ex510Si:null,ex510N:null,ex510S:null,metalFlatS:null,ex600Si:null,ex600Io:null,ex600IoPolar:null,ex600IoCount:null,ex600IoUnits:[],ex245Si:null,ex245Io:null,ex245IoMod:null,ex250Si:null,ex250Io:null,ex250Spec:null,ex260Si:null,ex260Pts:null,ex260Polar:null,ex260Conn:null,ex126Si:null,ex120Si:null,ex120Proto:null,ex180Si:null,ex180Pts:null,ex180Conn:null,ex180PolarSel:null,subScrew:'',eportPilot:'int',eportAssy:'',metalPePort:'',connUpperPePort:null,mixBig:'',mixSmall:'',abPipeType:null,abDir:null,abCode:null,abUnit:'mm',peFittingUnit:'mm',peFittingDir:null,mountMethod:null,mountPlate:false,mountPrint:false,mountDinLen:null,manifestOpts:{},backpressAssyAll:false,valveCount:2,valveTypes:[],valveSpecs:[],bulkSpec:null});
+  Object.assign(S, {series:null,base:null,pipe:null,wiring:null,connType:null,connDir:null,leadNum:null,leadLen:null,wirelessType:null,wirelessNum:null,wirelessPnp:false,ex500Si:null,ex510Si:null,ex510N:null,ex510S:null,metalFlatS:null,ex600Si:null,ex600Io:null,ex600IoPolar:null,ex600IoCount:null,ex600IoUnits:[],ex245Si:null,ex245Io:null,ex245IoMod:null,ex250Si:null,ex250Io:null,ex250Spec:null,ex260Si:null,ex260Pts:null,ex260Polar:null,ex260Conn:null,ex126Si:null,ex120Si:null,ex120Proto:null,ex180Si:null,ex180Pts:null,ex180Conn:null,ex180PolarSel:null,subScrew:'',eportPilot:'int',eportAssy:'',metalPePort:'',connUpperPePort:null,mixBig:'',mixSmall:'',abPipeType:null,abDir:null,abCode:null,abUnit:'mm',peFittingUnit:'mm',peFittingDir:null,mountMethod:null,mountPlate:false,mountPrint:false,mountDinLen:null,manifestOpts:{},silencerSide:null,plugTarget:null,backpressAssyAll:false,valveCount:2,valveTypes:[],valveSpecs:[],bulkSpec:null});
   document.querySelectorAll('.chip,.wc,.sub-chip').forEach(e=>e.classList.remove('active','wc-active'));
   [1,2,3,4,5,6,7,8,9].forEach(n=>{markStep(n,''); var sv=document.getElementById('sv'+n); if(sv) sv.textContent='—';});
   document.getElementById('step5-wrap').style.display='none';
