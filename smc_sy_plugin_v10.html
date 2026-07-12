@@ -6849,12 +6849,7 @@ function renderSVG(noRecenter) {
     arrow(arX,fBsY+FBASE_H/2,'P',C.pPort);
   }
 
-  // DIN RAIL ラベルと図（VIEW 2 の下）
-  var dinLblY = V2_TOP + V2_H + 16;
-  var dinBarY = dinLblY + 6;
-  p.push(R(BX, dinBarY, BW, 4, 0, C.dinRail));
-  p.push(R(BX, dinBarY+1, BW, 1.5, 0, 'rgba(255,255,255,0.25)'));
-  p.push(JTx(BX+BW/2, dinBarY+14, 'DIN RAIL (option)', 6.5, C.sub));
+  // （旧「DIN RAIL (option)」の常時描画は削除 — 取付方法選択時のみ上面図側に描画）
 
   // ── C2: 寸法参考線（バルブ搭載部＝カタログ寸法式のピッチ×連数）──
   if (S.base !== 'mixed') {
