@@ -3064,24 +3064,8 @@ function setEx180PolarSel(v) {
 }
 
 function changeValve(d) {
-  const maxMap = { P:24, PG:10, PH:8, F:24, FW:24 };
-  const leadMaxMap = { '1':24, '2':16, '3':8 };
-  // 金属ベース+フラット時の連数上限
-  const metalFlatMaxDouble = { P:12, PG:9,  PH:4 };
-  const metalFlatMaxSingle = { P:12, PG:12, PH:8 };
-  let max = 24;
-  if (S.base === 'metal' && S.wiring === 'dsub') {
-    // 金属ベース+Dサブ: ダブル=12連, シングル=12連
-    max = 12;
-  } else if (S.base === 'metal' && S.wiring === 'flat' && S.connType) {
-    max = (S.metalFlatS === 'S') ? (metalFlatMaxSingle[S.connType]||12) : (metalFlatMaxDouble[S.connType]||9);
-  } else if (S.base === 'metal' && S.wiring === 'ex510') {
-    max = (S.ex510S === 'S') ? 24 : 16;
-  } else if ((S.wiring==='flat'||S.wiring==='dsub') && S.connType) {
-    max = maxMap[S.connType] || 24;
-  } else if (S.wiring==='lead' && S.leadNum) {
-    max = leadMaxMap[S.leadNum] || 24;
-  }
+  // 連数上限は getWiringLimits()（カタログ連数表準拠）に一本化
+  var max = getWiringLimits().st;
   S.valveCount = Math.max(2, Math.min(max, S.valveCount + d));
   // valveTypesを連数に合わせて同期
   while (S.valveTypes.length < S.valveCount) S.valveTypes.push('single');
@@ -4648,7 +4632,7 @@ function zoomReset() {
 // 「左上に固定」ではなく、初期スクロール位置で「左寄せ＋縦中央」に見せる方式。
 var _SVG_PAD_X = 600;       // 左パディング
 var _SVG_PAD_Y = 600;       // 上パディング
-var _SVG_LEFT_MARGIN = 24;  // 初期表示時に左端へ残す見た目の余白
+var _SVG_LEFT_MARGIN = 8;   // 初期表示時に左端へ残す見た目の余白
 
 function _svgCenter(area, newW, newH) {
   function doCenter() {
@@ -6434,6 +6418,21 @@ function renderSVG(noRecenter) {
   p.push(R(BX, dinBarY, BW, 4, 0, C.dinRail));
   p.push(R(BX, dinBarY+1, BW, 1.5, 0, 'rgba(255,255,255,0.25)'));
   p.push(JTx(BX+BW/2, dinBarY+14, 'DIN RAIL (option)', 6.5, C.sub));
+
+  // ── 増連＋ボタン（右エンドプレートの右横・クリックで1連追加）──
+  (function(){
+    var limAdd = getWiringLimits().st;
+    var canAdd = n < limAdd;
+    var px = BX + BW + 27;
+    var py = BODY_Y + BODY_H/2 - 6;
+    p.push('<g ' + (canAdd ? 'onclick="changeValve(1)" ' : '') + 'style="cursor:' + (canAdd?'pointer':'default') + ';" opacity="' + (canAdd?'1':'0.35') + '">'
+      + Ci(px, py, 13, canAdd?'#eaf3ff':'#eef1f5', canAdd?'#2d7bd4':'#a8b6c6', 1.6)
+      + L(px-6, py, px+6, py, canAdd?'#2d7bd4':'#8a98a8', 2.2)
+      + L(px, py-6, px, py+6, canAdd?'#2d7bd4':'#8a98a8', 2.2)
+      + JTx(px, py+27, canAdd?'増連':'上限', 8, canAdd?'#2d7bd4':'#8a98a8')
+      + '<title>' + (canAdd ? 'バルブを1連追加（'+n+'→'+(n+1)+'連）' : '連数上限 '+limAdd+'連です') + '</title>'
+      + '</g>');
+  })();
 
   svg.innerHTML = p.join('');
 }
