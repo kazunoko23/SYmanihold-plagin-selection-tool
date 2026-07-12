@@ -332,6 +332,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
   <div class="tb-right">
     <button class="btn-top btn-reset" onclick="resetAll()">⟳ リセット</button>
     <button class="btn-top btn-excel" onclick="exportExcel()">📥 Excel 仕様書</button>
+    <button class="btn-top btn-excel" id="official-form-btn" onclick="document.getElementById('official-form-input').click()"
+      title="SMC公式のマニホールド仕様書Excel（SS5Y□-□□.xlsx）を選択またはこのボタンにドラッグ＆ドロップすると、現在の選定内容を自動記入します"
+      style="background:#0d7a4f;margin-left:6px;">📝 公式仕様書に記入</button>
+    <input type="file" id="official-form-input" accept=".xlsx" style="display:none;" onchange="fillOfficialSpecForm(this.files[0]);this.value='';">
     <button class="btn-top btn-excel" onclick="exportEditorJSON()" style="background:#2c5f8a;margin-left:6px;">📐 回路図JSON</button>
   </div>
 </div>
@@ -4700,6 +4704,17 @@ document.addEventListener('DOMContentLoaded', function() {
       if (rb) rb.style.display = '';
     }
   } catch(e) {}
+  // 公式仕様書ボタンへの .xlsx ドラッグ＆ドロップ
+  var ofBtn = document.getElementById('official-form-btn');
+  if (ofBtn) {
+    ofBtn.addEventListener('dragover', function(e){ e.preventDefault(); ofBtn.style.outline = '2px dashed #fff'; });
+    ofBtn.addEventListener('dragleave', function(){ ofBtn.style.outline = ''; });
+    ofBtn.addEventListener('drop', function(e){
+      e.preventDefault(); ofBtn.style.outline = '';
+      var f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) fillOfficialSpecForm(f);
+    });
+  }
   var area = document.getElementById('manifold-scroll-area');
   if (area) {
     area.addEventListener('wheel', function(e) {
@@ -7074,6 +7089,427 @@ function copyAllValvePN() {
   var txt = lines.join('\n');
   if (navigator.clipboard) navigator.clipboard.writeText(txt);
   else { var ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
+}
+
+// ════════════════════════════════════════════════════
+// SMC公式マニホールド仕様書（記入用紙 .xlsx）自動記入
+//   xlsxをZIPレベルで直接編集し、公式書式（罫線・画像・印刷設定）を完全保持する。
+//   解凍はブラウザ内蔵 DecompressionStream（外部通信なし・追加ライブラリ不要）。
+// ════════════════════════════════════════════════════
+
+// ─── CRC32 ───
+var _CRC_TABLE = (function(){
+  var t = new Uint32Array(256);
+  for (var n2 = 0; n2 < 256; n2++) { var c = n2; for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n2] = c >>> 0; }
+  return t;
+})();
+function _crc32(buf) {
+  var c = 0xFFFFFFFF;
+  for (var i = 0; i < buf.length; i++) c = _CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+async function _inflateRaw(u8) {
+  var ds = new DecompressionStream('deflate-raw');
+  var res = new Response(new Blob([u8]).stream().pipeThrough(ds));
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+// ─── ZIP読み込み（central directory走査）───
+function _zipParse(buf) {
+  var dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  var eocd = -1;
+  for (var i = buf.length - 22; i >= Math.max(0, buf.length - 22 - 65536); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('ZIP(xlsx)形式ではありません');
+  var count = dv.getUint16(eocd + 10, true);
+  var cdOff = dv.getUint32(eocd + 16, true);
+  var entries = []; var p = cdOff;
+  for (var e = 0; e < count; e++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('ZIP central directory 破損');
+    var nlen = dv.getUint16(p + 28, true), elen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
+    entries.push({
+      method: dv.getUint16(p + 10, true),
+      crc:    dv.getUint32(p + 16, true),
+      csize:  dv.getUint32(p + 20, true),
+      usize:  dv.getUint32(p + 24, true),
+      lho:    dv.getUint32(p + 42, true),
+      name:   new TextDecoder().decode(buf.subarray(p + 46, p + 46 + nlen)),
+    });
+    p += 46 + nlen + elen + clen;
+  }
+  entries.forEach(function(en) {
+    var q = en.lho;
+    if (dv.getUint32(q, true) !== 0x04034b50) throw new Error('ZIP local header 破損');
+    var nlen2 = dv.getUint16(q + 26, true), elen2 = dv.getUint16(q + 28, true);
+    en.raw = buf.subarray(q + 30 + nlen2 + elen2, q + 30 + nlen2 + elen2 + en.csize);
+  });
+  return entries;
+}
+
+async function _zipEntryText(entries, name) {
+  var en = entries.find(function(x){ return x.name === name; });
+  if (!en) return null;
+  var data = en.method === 0 ? en.raw : await _inflateRaw(en.raw);
+  return new TextDecoder().decode(data);
+}
+
+// ─── ZIP書き出し（変更エントリはSTORED格納、他は元の圧縮データを転写）───
+function _zipBuild(entries, replacements) {
+  var enc = new TextEncoder();
+  function u16(v){ return new Uint8Array([v & 255, (v >> 8) & 255]); }
+  function u32(v){ return new Uint8Array([v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255]); }
+  var parts = [], central = [], off = 0;
+  entries.forEach(function(en) {
+    var nameB = enc.encode(en.name);
+    var rep = replacements[en.name];
+    var method = rep ? 0 : en.method;
+    var data = rep || en.raw;
+    var crc = rep ? _crc32(rep) : en.crc;
+    var usize = rep ? rep.length : en.usize;
+    var lhOff = off;
+    [u32(0x04034b50), u16(20), u16(0x0800), u16(method), u16(0), u16(0),
+     u32(crc), u32(data.length), u32(usize), u16(nameB.length), u16(0), nameB, data]
+      .forEach(function(b){ parts.push(b); off += b.length; });
+    central.push({ nameB: nameB, method: method, crc: crc, csize: data.length, usize: usize, off: lhOff });
+  });
+  var cdStart = off;
+  central.forEach(function(c) {
+    [u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(c.method), u16(0), u16(0),
+     u32(c.crc), u32(c.csize), u32(c.usize), u16(c.nameB.length), u16(0), u16(0),
+     u16(0), u16(0), u32(0), u32(c.off), c.nameB]
+      .forEach(function(b){ parts.push(b); off += b.length; });
+  });
+  var cdSize = off - cdStart;
+  [u32(0x06054b50), u16(0), u16(0), u16(central.length), u16(central.length), u32(cdSize), u32(cdStart), u16(0)]
+    .forEach(function(b){ parts.push(b); off += b.length; });
+  var out = new Uint8Array(off); var o = 0;
+  parts.forEach(function(b){ out.set(b, o); o += b.length; });
+  return out;
+}
+
+// ─── セル参照・XMLユーティリティ ───
+function _colToNum(col){ var n = 0; for (var i = 0; i < col.length; i++) n = n * 26 + (col.charCodeAt(i) - 64); return n; }
+function _xmlEsc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function _xmlUnesc(s){ return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&'); }
+
+function _parseSharedStrings(xml) {
+  if (!xml) return [];
+  var out = [], re = /<si(?:[ >])([\s\S]*?)<\/si>/g, m;
+  while ((m = re.exec(xml))) {
+    // ふりがな（ルビ）<rPh>…</rPh> は本文に含めない
+    var body = m[1].replace(/<rPh[\s\S]*?<\/rPh>/g, '');
+    var txt = '', tre = /<t[^>]*>([\s\S]*?)<\/t>/g, t;
+    while ((t = tre.exec(body))) txt += t[1];
+    out.push(_xmlUnesc(txt));
+  }
+  return out;
+}
+
+// シートXML→ { "A1": "値", ... }（文字列値のみ・空は含めない）
+function _sheetCellMap(xml, sst) {
+  var map = {}, re = /<c r="([A-Z]+\d+)"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g, m;
+  while ((m = re.exec(xml))) {
+    var attrs = m[2] || '', inner = m[3] || '';
+    var tm = attrs.match(/ t="([^"]+)"/); var t = tm ? tm[1] : 'n';
+    var v = '';
+    if (t === 'inlineStr') { var im = inner.match(/<t[^>]*>([\s\S]*?)<\/t>/); v = im ? _xmlUnesc(im[1]) : ''; }
+    else { var vm = inner.match(/<v>([\s\S]*?)<\/v>/); if (vm) v = (t === 's') ? (sst[parseInt(vm[1], 10)] || '') : vm[1]; }
+    if (String(v).trim() !== '') map[m[1]] = String(v);
+  }
+  return map;
+}
+
+// セル書き込み（inlineStr）。既存<c>はスタイル(s=)保持のまま置換、なければ列順を守って挿入。
+function _setSheetCell(xml, ref, value) {
+  var col = ref.match(/^[A-Z]+/)[0], row = parseInt(ref.match(/\d+$/)[0], 10);
+  var content = '<is><t xml:space="preserve">' + _xmlEsc(value) + '</t></is>';
+  var cellRe = new RegExp('<c r="' + ref + '"([^>]*?)(?:/>|>[\\s\\S]*?</c>)');
+  var m = xml.match(cellRe);
+  if (m) {
+    var attrs = m[1].replace(/ t="[^"]*"/, '');
+    return xml.replace(cellRe, '<c r="' + ref + '"' + attrs + ' t="inlineStr">' + content + '</c>');
+  }
+  var newCell = '<c r="' + ref + '" t="inlineStr">' + content + '</c>';
+  var rowRe = new RegExp('(<row r="' + row + '"[^>]*>)([\\s\\S]*?)(</row>)');
+  var rm = xml.match(rowRe);
+  if (rm) {
+    var cellsStr = rm[2], insertAt = cellsStr.length;
+    var cre = /<c r="([A-Z]+)(\d+)"/g, cm, myN = _colToNum(col);
+    while ((cm = cre.exec(cellsStr))) {
+      if (_colToNum(cm[1]) > myN) { insertAt = cm.index; break; }
+    }
+    return xml.replace(rowRe, rm[1] + cellsStr.slice(0, insertAt) + newCell + cellsStr.slice(insertAt) + rm[3]);
+  }
+  var newRow = '<row r="' + row + '">' + newCell + '</row>';
+  var rre = /<row r="(\d+)"/g, rmatch, insPos = -1;
+  while ((rmatch = rre.exec(xml))) {
+    if (parseInt(rmatch[1], 10) > row) { insPos = rmatch.index; break; }
+  }
+  if (insPos >= 0) return xml.slice(0, insPos) + newRow + xml.slice(insPos);
+  return xml.replace('</sheetData>', newRow + '</sheetData>');
+}
+
+// ─── 手配リスト（構成製品リスト/手配集約の共通ソース）───
+function buildOrderItems() {
+  var series = S.series || '5';
+  var typeLabelMap = {single:'2位置シングル', double:'2位置ダブル', '3cs':'3位置クローズドセンタ',
+    '3es':'3位置エキゾーストセンタ', '3ps':'3位置プレッシャセンタ', '4pos':'4位置',
+    'dual':'4位置デュアル', '3port':'4位置3ポート', blank:'ブランクプレート'};
+  var agg = {}, order = 0;
+  function add(pn, label) {
+    if (!pn || pn.indexOf('⚠') >= 0 || pn.indexOf('—') >= 0) return;
+    if (!agg[pn]) agg[pn] = { count: 0, label: label, order: order++ };
+    agg[pn].count++;
+  }
+  for (var i = 0; i < (S.valveCount || 0); i++) {
+    var spec = getValveSpec(i), opt = spec.manifoldOpt || {};
+    var pn = getValvePN(i).replace(/（[^）]*）/g, '');
+    var vt = S.valveTypes[i] || 'single';
+    add(pn, opt.slot ? ((OPTION_DEFS[opt.slot]||{}).label || opt.slot) : (typeLabelMap[vt] || vt));
+    if (opt.supSpacerPipe) add(getOptPN('sup_spacer', series, {pipe:opt.supSpacerPipe, size:opt.supSpacerSize}), '単独SUP.スペーサ');
+    if (opt.exhSpacerPipe) add(getOptPN('exh_spacer', series, {pipe:opt.exhSpacerPipe, size:opt.exhSpacerSize}), '単独EXH.スペーサ');
+    if (opt.residualStop)  add(getOptPN('residual_stop', series, {}), 'SUPストップ弁スペーサ');
+    if (opt.residualPerf)  add(getOptPN('residual_perf', series, {}), 'パーフェクトスペーサ');
+    if (opt.reducValve && opt.reducValve.gauge) add(buildReducValvePN(series, opt.reducValve), 'スペーサ形減圧弁');
+    if (opt.backpressAssy) add(getBackpressAssyPN(series), "背圧防止弁Ass'y");
+    if (opt.blockingDiscSup) add(getBlockingDiscPN(series, 'sup'), 'SUPブロッキングディスク');
+    if (opt.blockingDiscExh) add(getBlockingDiscPN(series, 'exh'), 'EXHブロッキングディスク');
+  }
+  if (S.wiring === 'ex600' && S.ex600IoUnits) {
+    S.ex600IoUnits.forEach(function(iopn){ add(iopn, 'EX600 I/Oユニット'); });
+  }
+  MANIFOLD_LEVEL_OPTS.forEach(function(k) {
+    var cnt = (S.manifestOpts || {})[k];
+    if (!cnt || cnt <= 0) return;
+    var pnAcc = k === 'silencer' ? getSilencerPN() : k === 'plug' ? getPlugPN(S.plugTarget || 'ab') : '—';
+    for (var c = 0; c < cnt; c++) add(pnAcc, (OPTION_DEFS[k]||{}).label || k);
+  });
+  return Object.keys(agg).sort(function(a, b){ return agg[a].order - agg[b].order; })
+    .map(function(pn){ return { pn: pn, qty: agg[pn].count, label: agg[pn].label }; });
+}
+
+// ─── 公式仕様書 自動記入 本体 ───
+async function fillOfficialSpecForm(file) {
+  try {
+    if (!file) return;
+    var res = buildPN();
+    if (!res) { alert('先に選定を進めてください（品番が生成されていません）'); return; }
+
+    var buf = new Uint8Array(await file.arrayBuffer());
+    var entries = _zipParse(buf);
+    var sheetEntry = entries.filter(function(e){ return /^xl\/worksheets\/sheet\d+\.xml$/.test(e.name); })
+      .sort(function(a, b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); })[0];
+    if (!sheetEntry) { alert('ワークシートが見つかりません（公式仕様書の.xlsxを指定してください）'); return; }
+    var sst = _parseSharedStrings(await _zipEntryText(entries, 'xl/sharedStrings.xml'));
+    var xml = await _zipEntryText(entries, sheetEntry.name);
+    var cells = _sheetCellMap(xml, sst);
+    var keys = Object.keys(cells);
+    function rowNum(ref){ return parseInt(ref.match(/\d+$/)[0], 10); }
+    function colOf(ref){ return ref.match(/^[A-Z]+/)[0]; }
+
+    // ── テンプレート検出・整合チェック ──
+    var title = '';
+    keys.forEach(function(r){ if (!title && String(cells[r]).indexOf('マニホールド仕様書') >= 0) title = cells[r]; });
+    var tm = (title || '').match(/SS5Y(\d)[-ー−]([A-Z0-9]+)/);
+    if (!tm) { alert('SMC公式マニホールド仕様書（SS5Y□-□□）として認識できませんでした。\nタイトル: ' + (title || '不明')); return; }
+    var typeCode = (res.segs.find(function(s){ return s.key === '型式+配線'; }) || {}).val || '';
+    if (tm[1] !== S.series || typeCode.indexOf(tm[2]) !== 0) {
+      alert('テンプレートと選定内容が一致しません。\n・テンプレート: SS5Y' + tm[1] + '-' + tm[2]
+        + '\n・現在の選定: SS5Y' + S.series + '-' + typeCode
+        + '\n\n該当するサイズ・接続タイプの仕様書ファイルを指定してください。');
+      return;
+    }
+
+    var writes = {};
+    function W(ref, val){ if (val !== '' && val !== null && val !== undefined) writes[ref] = String(val); }
+
+    // ── マージセル一覧（記入ボックス特定用）──
+    var merges = [];
+    var mre = /<mergeCell ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\/>/g, mm2;
+    while ((mm2 = mre.exec(xml))) merges.push({ c1: mm2[1], r1: +mm2[2], c2: mm2[3], r2: +mm2[4] });
+
+    // ── ◆マニホールド型式 行のボックス記入 ──
+    var pnRowRef = keys.find(function(r){ return String(cells[r]).indexOf('SS5Y') === 0; });
+    var filledPnBoxes = 0;
+    if (pnRowRef) {
+      var pnRow = rowNum(pnRowRef);
+      var typeCellRef = keys.find(function(r){ return rowNum(r) === pnRow && cells[r] === tm[2]; })
+                     || keys.find(function(r){ return rowNum(r) === pnRow && String(cells[r]).indexOf(tm[2]) === 0 && r !== pnRowRef; });
+      var typeCol = typeCellRef ? _colToNum(colOf(typeCellRef)) : _colToNum(colOf(pnRowRef));
+      var dashCols = keys.filter(function(r){ return rowNum(r) === pnRow && cells[r] === '―' && _colToNum(colOf(r)) > typeCol; })
+        .map(function(r){ return _colToNum(colOf(r)); }).sort(function(a,b){ return a-b; });
+      var endCol = keys.filter(function(r){ return rowNum(r) === pnRow && (cells[r] === '⇒' || String(cells[r]).indexOf('右頁') >= 0); })
+        .map(function(r){ return _colToNum(colOf(r)); }).sort(function(a,b){ return a-b; })[0] || 9999;
+      var boxes = merges.filter(function(g){
+        return g.r1 === pnRow && g.r2 === pnRow && !cells[g.c1 + pnRow]
+          && _colToNum(g.c1) > typeCol && _colToNum(g.c1) < endCol;
+      }).map(function(g){ return { col: g.c1, n: _colToNum(g.c1) }; }).sort(function(a,b){ return a.n-b.n; });
+      // グループ分割: type直後〜次の―, ―〜―, 最後の―〜⇒
+      function groupOf(bn) {
+        var gi = 0;
+        dashCols.forEach(function(dc){ if (bn > dc) gi++; });
+        return gi;
+      }
+      var groups = [[], [], []];
+      boxes.forEach(function(b){ var gi = Math.min(groupOf(b.n), 2); groups[gi].push(b); });
+      // 値: G0=型式残り記号（SI/極性/I-O連数等）, G1=連数+P,E, G2=口径+ねじ+取付
+      var typeRest = typeCode.slice(tm[2].length);
+      var restTokens = [];
+      var trWork = typeRest;
+      var SI_TOKENS = ['EP','EB','DA','FA','FB','WS','FW','FC','PG','PH','PC','TC','AAN','ABN','ACN'];
+      while (trWork.length) {
+        var tok = SI_TOKENS.find(function(t2){ return trWork.indexOf(t2) === 0; }) || trWork.charAt(0);
+        restTokens.push(tok); trWork = trWork.slice(tok.length);
+      }
+      function fillGroup(gBoxes, vals) {
+        for (var gi2 = 0; gi2 < gBoxes.length; gi2++) {
+          if (gi2 < vals.length) {
+            var v2 = (gi2 === gBoxes.length - 1) ? vals.slice(gi2).join('') : vals[gi2];
+            if (v2) { W(gBoxes[gi2].col + pnRow, v2); filledPnBoxes++; }
+          }
+        }
+      }
+      fillGroup(groups[0], restTokens);
+      // 連数+P,E＝品番の第3セグメント（SS5Y3-10S6Q72-[05B]-C6）
+      var cntSeg = (res.full.split('-')[2] || '').match(/^(\d{2})([A-Z]*)$/) || [];
+      fillGroup(groups[1], [cntSeg[1] || String(S.valveCount).padStart(2,'0'), cntSeg[2] || '']);
+      var tail = res.full.split('-').slice(3).join('-');
+      var abPart = (S.pipe !== '上配管') ? (S.abCode || '') : '';
+      var mountPart = tail.indexOf(abPart) === 0 ? tail.slice(abPart.length) : (getMountCode() || '');
+      fillGroup(groups[2], [abPart, mountPart]);
+    }
+
+    // ── アンカー行の特定 ──
+    function rowOfLabel(sub, exact) {
+      var rows = keys.filter(function(r){
+        return exact ? cells[r] === sub : String(cells[r]).indexOf(sub) >= 0;
+      }).map(rowNum).sort(function(a,b){ return a-b; });
+      return rows[0] || 0;
+    }
+    function rowsOfLabel(sub) {
+      return keys.filter(function(r){ return String(cells[r]).indexOf(sub) >= 0; }).map(rowNum).sort(function(a,b){ return a-b; });
+    }
+    // 連番列（Ｄ側を含む最初のヘッダ行の半角数値セル）
+    var dRows = keys.filter(function(r){ return cells[r] === 'Ｄ側'; }).map(rowNum).sort(function(a,b){ return a-b; });
+    var hdrRow = dRows[0] || 0;
+    var stCols = keys.filter(function(r){
+      if (rowNum(r) !== hdrRow) return false;
+      var v = String(cells[r]).trim();
+      return /^\d+$/.test(v) && +v >= 1 && +v <= 32;
+    }).map(function(r){ return { col: colOf(r), n: parseInt(cells[r], 10) }; }).sort(function(a,b){ return a.n-b.n; });
+
+    var rI = rowOfLabel('切換方式');
+    var rJ = rowOfLabel('シール方式');
+    var rK = rowOfLabel('パイロット仕様');
+    var rL = rowOfLabel('背圧防止弁（バルブ内蔵');
+    var rM = rowOfLabel('パイロット弁オプション');
+    var rN = rowOfLabel('コイル仕様');
+    var rWire = rowOfLabel('配線仕様', true);
+    var rGport = rowOfLabel('（Ｇ）A,Bポート管接続口径');
+    // 搭載順番行（直前のオプションラベル行と対応付け）
+    var mountRows = rowsOfLabel('搭載順番');
+    function mountRowFor(label) {
+      // 注記行にも同じ語が出るため、「直下3行以内に搭載順番があるラベル行」を採用
+      var lrs = rowsOfLabel(label);
+      for (var li = 0; li < lrs.length; li++) {
+        var cands = mountRows.filter(function(r){ return r > lrs[li] && r <= lrs[li] + 3; });
+        if (cands.length) return cands[0];
+      }
+      return 0;
+    }
+    var rBlank = mountRowFor("ブランキングプレートAss'y");
+    var rSupSp = mountRowFor('単独SUP.スペーサ');
+    var rExhSp = mountRowFor('単独EXH.スペーサ');
+    var rPerf  = mountRowFor('パーフェクトスペーサ');
+    var rStop  = mountRowFor('SUP.ストップ弁スペーサ');
+
+    // ── 連ごとの記入 ──
+    var stationWrites = 0;
+    stCols.forEach(function(st) {
+      if (st.n > S.valveCount) return;
+      var spec = getValveSpec(st.n - 1);
+      var opt = spec.manifoldOpt || {};
+      var vt = S.valveTypes[st.n - 1] || 'single';
+      var isSlot = !!opt.slot, isBlank = vt === 'blank';
+      var normal = !isSlot && !isBlank;
+      if (normal) {
+        if (rI) { W(st.col + rI, getSwitchCode(vt)); stationWrites++; }
+        if (rJ) W(st.col + rJ, spec.seal || '0');
+        if (rK && spec.pilot === 'R') W(st.col + rK, 'R');
+        if (rL && spec.backpress === 'H') W(st.col + rL, 'H');
+        if (rM && spec.pilotOpt) W(st.col + rM, spec.pilotOpt);
+        if (rN && spec.coil) W(st.col + rN, spec.coil);
+        if (rWire) W(st.col + rWire, vt === 'single' ? '1' : '2');
+        if (rGport && S.pipe !== '上配管' && S.abCode && S.abCode !== 'CM' && S.abCode !== 'LM') {
+          W(st.col + rGport, S.abCode);
+          W(st.col + (rGport + 1), S.abCode);
+        }
+      }
+      if (rBlank && opt.slot === 'blanking') W(st.col + rBlank, '○');
+      if (rSupSp && opt.supSpacerPipe) W(st.col + rSupSp, '○');
+      if (rExhSp && opt.exhSpacerPipe) W(st.col + rExhSp, '○');
+      if (rPerf && opt.residualPerf) W(st.col + rPerf, '○');
+      if (rStop && opt.residualStop) W(st.col + rStop, '○');
+    });
+
+    // ── マニホールドバルブ品番（ご発注品番欄）──
+    var rOrderPn = rowOfLabel('マニホールドバルブ品番');
+    if (rOrderPn) {
+      var labelCol = _colToNum(colOf(keys.find(function(r){ return rowNum(r) === rOrderPn && String(cells[r]).indexOf('マニホールドバルブ品番') >= 0; })));
+      var box = merges.filter(function(g){
+        return g.r1 === rOrderPn && !cells[g.c1 + g.r1] && _colToNum(g.c1) > labelCol;
+      }).sort(function(a,b){ return _colToNum(a.c1) - _colToNum(b.c1); })[0];
+      if (box) W(box.c1 + box.r1, res.full);
+    }
+
+    // ── 構成製品リスト ──
+    var rList = rowOfLabel('構成製品リスト');
+    var listFilled = 0;
+    if (rList) {
+      // マニホールドベース品番を先頭に、続けて搭載品（＊組込み記号付き）
+      var items = [{ pn: res.full, qty: 1, label: 'マニホールドベース', noStar: true }].concat(buildOrderItems());
+      var slots = keys.filter(function(r){
+        var v = String(cells[r]).trim();
+        return rowNum(r) > rList && /^\d+$/.test(v) && +v >= 1 && +v <= 30;
+      }).map(function(r){ return { ref: r, idx: parseInt(cells[r], 10), row: rowNum(r), colN: _colToNum(colOf(r)) }; })
+        .sort(function(a,b){ return a.idx - b.idx; });
+      slots.forEach(function(sl) {
+        var it = items[sl.idx - 1];
+        if (!it) return;
+        var rowBoxes = merges.filter(function(g){
+          return g.r1 === sl.row && !cells[g.c1 + g.r1] && _colToNum(g.c1) > sl.colN;
+        }).sort(function(a,b){ return _colToNum(a.c1) - _colToNum(b.c1); });
+        if (rowBoxes[0]) { W(rowBoxes[0].c1 + sl.row, (it.noStar ? '' : '＊') + it.pn); listFilled++; }
+        if (rowBoxes[1]) W(rowBoxes[1].c1 + sl.row, String(it.qty));
+      });
+      if (items.length > slots.length) {
+        alert('注意: 構成製品が' + items.length + '件あり、リスト欄(' + slots.length + '行)に収まりませんでした。残りは手動で記入してください。');
+      }
+    }
+
+    // ── 書き込み実行・ZIP再構成 ──
+    var refs = Object.keys(writes);
+    refs.forEach(function(ref){ xml = _setSheetCell(xml, ref, writes[ref]); });
+    var repl = {};
+    repl[sheetEntry.name] = new TextEncoder().encode(xml);
+    var out = _zipBuild(entries, repl);
+    var blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '記入済_' + file.name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+
+    alert('公式仕様書に自動記入しました（' + refs.length + 'セル）。\n'
+      + '・マニホールド型式ボックス: ' + filledPnBoxes + '箇所\n'
+      + '・仕様欄（連別）: ' + stationWrites + '連分\n'
+      + '・構成製品リスト: ' + listFilled + '行\n\n'
+      + '※貴社名等のご記入欄・右頁凡例に依存する記号（(T)(U)継手仕様等）は記入していません。開いて内容をご確認ください。');
+  } catch (e) {
+    alert('自動記入に失敗しました: ' + e.message);
+  }
 }
 
 
