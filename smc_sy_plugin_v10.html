@@ -6502,10 +6502,16 @@ function renderSVG(noRecenter) {
   var tCols={single:'#486888',double:'#387878','3cs':'#6050a0','3es':'#406070','3ps':'#706030','4pos':'#7a3060','dual':'#307860','3port':'#706020',blank:'#505a68'};
   var tLabels={single:'2P-S',double:'2P-D','3cs':'3P-CS','3es':'3P-ES','3ps':'3P-PS','4pos':'4P-NC/NC','dual':'4P-NO/NO','3port':'4P-NC/NO',blank:'BLANK'};
 
+  var CENTER_LBL={'3cs':'C','3es':'E','3ps':'P'};
+  var SLOT_LBL={blanking:'ブランキング',out_blanking:'出力付BLK',sup_block:'単独SUP',exh_block:'単独EXH'};
+
   for(var iv=0;iv<n;iv++){
     var vx=VX0+iv*VW;
     var vcx=vx+VW/2;
     var vType=S.valveTypes[iv]||'single';
+    var vSpec=getValveSpec(iv);
+    var vOpt=vSpec.manifoldOpt||{};
+    var isSlotOpt=!!vOpt.slot;
     var isBlank=(vType==='blank');
     var isSel=(iv===_vpIdx);
     var vCol=tCols[vType]||tCols.single;
@@ -6513,11 +6519,35 @@ function renderSVG(noRecenter) {
     // divider
     if(iv>0) p.push(L(vx,SOL_Y,vx,BASE_Y+BASE_H,C.solBdr,0.7));
 
-    var isUnconfigured = !_touchedValves.has(iv);
+    var isUnconfigured = !_touchedValves.has(iv) && !isSlotOpt;
     p.push('<g class="vslot" data-vidx="'+iv+'" style="cursor:grab;" '
       + 'onclick="valveSlotClick('+iv+','+vcx+','+SOL_Y+',event)" '
       + 'oncontextmenu="showValveMenu('+iv+',event)" '
       + 'onmousedown="onValveMD('+iv+',event)">');
+    // ツールチップ（D1: ホバーで連情報）
+    (function(){
+      var tip=(iv+1)+'連目: '+String(getValvePN(iv)).replace(/（[^）]*）/g,'');
+      var det=[];
+      if(!isSlotOpt&&!isBlank){
+        det.push(vSpec.seal==='1'?'メタルシール':'弾性体シール');
+        if(vSpec.pilot==='R')det.push('外部パイロット');
+        if(vSpec.backpress==='H')det.push('背圧防止弁内蔵');
+        if(vSpec.coil==='T')det.push('節電コイル');
+        if(vSpec.lamp)det.push('ランプ・サージ('+vSpec.lamp+')');
+      }
+      var opts=[];
+      if(vOpt.supSpacerPipe)opts.push('単独SUP.スペーサ');
+      if(vOpt.exhSpacerPipe)opts.push('単独EXH.スペーサ');
+      if(vOpt.residualStop)opts.push('SUPストップ弁');
+      if(vOpt.residualPerf)opts.push('パーフェクトスペーサ');
+      if(vOpt.reducValve&&vOpt.reducValve.gauge)opts.push('スペーサ形減圧弁');
+      if(vOpt.backpressAssy)opts.push('背圧防止弁Assy');
+      if(vOpt.blockingDiscSup)opts.push('SUPブロッキングディスク');
+      if(vOpt.blockingDiscExh)opts.push('EXHブロッキングディスク');
+      if(det.length)tip+='\n'+det.join(' / ');
+      if(opts.length)tip+='\nOP: '+opts.join(' / ');
+      p.push('<title>'+tip.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</title>');
+    })();
     // ヒットエリア（透明・全高）
     p.push('<rect x="'+vx+'" y="'+SOL_Y+'" width="'+VW+'" height="'+(SOL_H+BODY_H+BASE_H)+'" fill="transparent"/>');
     // ホバーオーバーレイ
@@ -6527,23 +6557,76 @@ function renderSVG(noRecenter) {
       p.push('<rect class="vslot-pulse" x="'+(vx+2)+'" y="'+(SOL_Y+2)+'" width="'+(VW-4)+'" height="'+(SOL_H+BODY_H+BASE_H-4)+'" fill="rgba(90,180,255,0.1)" rx="2"/>');
     }
 
-
-    if(isBlank){
+    if(isSlotOpt){
+      // ── スロット占有オプションの描画（A1）──
+      if(vOpt.slot==='blanking'||vOpt.slot==='out_blanking'){
+        p.push(R(vx+3,SOL_Y+4,VW-6,SOL_H-8,2,'#42525f'));
+        p.push(R(vx,BODY_Y,VW,BODY_H+BASE_H,0,'#95a5b2'));
+        for(var hh=0;hh<5;hh++){
+          p.push(L(vx+3+hh*9,BODY_Y+BODY_H+BASE_H-5,vx+11+hh*9,BODY_Y+5,'#72828f',1));
+        }
+        p.push(R(vx+3,BODY_Y+BODY_H/2-8,VW-6,15,2,'#e8eef4','#8a9aaa',0.6));
+        p.push(Tx(vcx,BODY_Y+BODY_H/2+2,SLOT_LBL[vOpt.slot],4.6,'#4a5868'));
+        if(vOpt.slot==='out_blanking'){
+          p.push(Ci(vcx,SOL_Y+SOL_H/2,3,'#101c28','#50c878',1));
+          p.push(Tx(vcx,BODY_Y+BODY_H/2+22,'信号取出',4.5,'#4a5868'));
+        }
+      } else {
+        // 単独SUP./EXH.ブロック: 供給=青系 / 排気=橙系＋ポート表示
+        var isSupB=vOpt.slot==='sup_block';
+        p.push(R(vx+3,SOL_Y+4,VW-6,SOL_H-8,2,'#42525f'));
+        p.push(R(vx,BODY_Y,VW,BODY_H+BASE_H,0,isSupB?'#2c5a86':'#8a4c32'));
+        p.push(portHole(vcx,BODY_Y+20,6,isSupB?C.pPort:C.ePort,isSupB?'P':'E'));
+        p.push(Tx(vcx,BODY_Y+BODY_H/2+10,SLOT_LBL[vOpt.slot],5.2,'#e4eef8'));
+        p.push(Tx(vcx,BODY_Y+BODY_H/2+20,'ブロック',5.2,'#c8d8e8'));
+      }
+      p.push(Tx(vcx,BODY_Y+BODY_H-14,String(iv+1),9,'#37475a'));
+    } else if(isBlank){
       p.push(R(vx,BODY_Y,VW,BODY_H+BASE_H,0,'#8090a0'));
       p.push(Tx(vcx,BODY_Y+BODY_H/2+3,'BLANK',5.5,'#4a5868'));
+      p.push(Tx(vcx,BODY_Y+BODY_H/2+15,String(iv+1),9,'#5a6a7a'));
     } else {
-      // solenoid coil
-      var isDbl=(vType==='double'||vType==='3cs'||vType==='3es'||vType==='3ps');
-      if(isDbl){
+      // ── ソレノイド描画（A1: 切換方式で描き分け）──
+      var is2sol=(vType!=='single');
+      var is3pos=(vType==='3cs'||vType==='3es'||vType==='3ps');
+      var is4pos=(vType==='4pos'||vType==='dual'||vType==='3port');
+      var ledCol = vSpec.lamp ? '#35d07a' : '#2a4258';  // ランプ付=緑点灯（A3）
+      if(is2sol){
         var sw2=VW/2-3;
         p.push(R(vx+1,SOL_Y+3,sw2,SOL_H-6,2,'#223a52','#3a6078',0.7));
-        p.push(Ci(vx+1+sw2-4,SOL_Y+7,1.8,'#3a8050'));
+        p.push(Ci(vx+1+sw2-4,SOL_Y+7,1.8,ledCol));
         p.push(R(vx+VW/2+2,SOL_Y+3,sw2,SOL_H-6,2,'#1e3248','#3a5870',0.7));
-        p.push(Ci(vx+VW/2+2+sw2-4,SOL_Y+7,1.8,'#907030'));
+        p.push(Ci(vx+VW/2+2+sw2-4,SOL_Y+7,1.8,vSpec.lamp?'#e0a030':'#3a3524'));
+        if(is3pos){
+          // 3位置: 中央にセンタ種別バッジ（C/E/P）＝スプリングセンタ表現
+          p.push(Ci(vcx,SOL_Y+SOL_H/2,5.5,'#5a4a90','#9a8ad0',1));
+          p.push(Tx(vcx,SOL_Y+SOL_H/2+2.2,CENTER_LBL[vType],6,'#efe8ff'));
+        }
+        if(is4pos){
+          p.push(R(vcx-8,SOL_Y+SOL_H/2-5,16,10,3,'#7a3060','#c070a0',1));
+          p.push(Tx(vcx,SOL_Y+SOL_H/2+2.2,'4P',6,'#ffd8ec'));
+        }
       } else {
         var sw1=VW-8;
         p.push(R(vx+4,SOL_Y+3,sw1,SOL_H-6,2,'#223a52','#3a6078',0.7));
-        p.push(Ci(vx+4+sw1-4,SOL_Y+7,1.8,'#3a8050'));
+        p.push(Ci(vx+4+sw1-4,SOL_Y+7,1.8,ledCol));
+      }
+      // ── A3: バルブ個別仕様マーク ──
+      if(vSpec.seal==='1'){ // メタルシール: 銀帯＋MS
+        p.push(R(vx+2,BODY_Y+3,VW-4,5,1,'#c8d2dc','#98a8b8',0.5));
+        p.push(Tx(vx+9,BODY_Y+7.2,'MS',4.2,'#5a6a7a'));
+      }
+      if(vSpec.pilot==='R'){ // 外部パイロット: 黄コーナー
+        p.push('<path d="M '+(vx+VW-1)+' '+(BODY_Y+1)+' l-10 0 l10 10 z" fill="#d8b020"/>');
+        p.push(Tx(vx+VW-4.5,BODY_Y+6.5,'R',4.2,'#403508'));
+      }
+      if(vSpec.coil==='T'){ // 節電コイル
+        p.push(Ci(vx+6,SOL_Y+SOL_H-6,3.4,'#144028','#35d07a',0.7));
+        p.push(Tx(vx+6,SOL_Y+SOL_H-3.8,'T',4.5,'#a0f0c0'));
+      }
+      if(vSpec.backpress==='H'){ // 背圧防止弁内蔵
+        p.push(Ci(vx+VW-6,BODY_Y+BODY_H-16,3.4,'#402818','#d08040',0.7));
+        p.push(Tx(vx+VW-6,BODY_Y+BODY_H-13.8,'H',4.5,'#ffd0a8'));
       }
       // A/B ports in body (upper piping only)
       if(isUpper){
@@ -6552,6 +6635,7 @@ function renderSVG(noRecenter) {
         p.push(Tx(vcx+8,abY+10,'A',5,'#3060a0'));
         p.push(xmark(vcx-8,abY,6));
         p.push(Tx(vcx-8,abY+10,'B',5,'#3060a0'));
+        if(vSpec.portSize) p.push(Tx(vcx,abY+17,vSpec.portSize,4.5,'#3060a0'));
       }
       // type label + number
       p.push(Tx(vcx,BODY_Y+BODY_H/2-1,tLabels[vType]||'',6,'#3a5070'));
@@ -6561,11 +6645,52 @@ function renderSVG(noRecenter) {
       p.push(R(vx+4,BODY_Y+BODY_H-10,VW-8,7,2,barCol));
     }
 
+    // ── A2: ソレノイド点数チップ（上部）──
+    if(!isSlotOpt&&!isBlank){
+      var ptsChip=(vType==='single')?'1':'2';
+      p.push(R(vcx-6,SOL_Y-11,12,9,4.5,ptsChip==='1'?'#e2eef8':'#fde8d8',ptsChip==='1'?'#7aa8d0':'#d09060',0.7));
+      p.push(Tx(vcx,SOL_Y-4.2,ptsChip,5.8,ptsChip==='1'?'#2a5a8a':'#a05820'));
+    }
+
     // selection ring
     if(isSel) p.push(R(vx,SOL_Y,VW,SOL_H+BODY_H,'none','none','#2a70c8',2));
 
     p.push('</g>');
   }
+
+  // ── B1: P/E系統帯（供給P=青 / 排気E=橙）と回路分断の可視化 ──
+  // バルブ描画の後に重ねることで、単独ブロック/ブロッキングディスクによる系統分断が見える
+  var pBandY = BASE_Y + 4, eBandY = BASE_Y + BASE_H - 8, bandH = 4;
+  p.push('<g style="pointer-events:none;">');
+  p.push(R(BX+3, pBandY, BW-6, bandH, 2, 'rgba(70,140,220,0.55)'));
+  p.push(R(BX+3, eBandY, BW-6, bandH, 2, 'rgba(220,110,70,0.5)'));
+  p.push(Tx(BX+10, pBandY+3.4, 'P', 4.5, '#cfe4ff'));
+  p.push(Tx(BX+10, eBandY+3.4, 'E', 4.5, '#ffd8c8'));
+  for (var bi = 0; bi < n; bi++) {
+    var bOpt = getValveSpec(bi).manifoldOpt || {};
+    var bx0 = VX0 + bi * VW;
+    // ブロッキングディスク: 連の境界（D側寄り）で系統を分断
+    if (bOpt.blockingDiscSup) {
+      p.push(R(bx0-1.5, pBandY-1.5, 3, bandH+3, 0, '#e02020'));
+    }
+    if (bOpt.blockingDiscExh) {
+      p.push(R(bx0-1.5, eBandY-1.5, 3, bandH+3, 0, '#e02020'));
+    }
+    // 単独SUP./EXH.ブロック: そのスロットで帯を切り、新規供給/排気点を示す
+    if (bOpt.slot === 'sup_block') {
+      p.push(R(bx0+1, pBandY-1, VW-2, bandH+2, 0, '#2c5a86'));
+      p.push(R(bx0-1.5, pBandY-1.5, 3, bandH+3, 0, '#e02020'));
+      p.push(R(bx0+VW-1.5, pBandY-1.5, 3, bandH+3, 0, '#e02020'));
+      p.push(Ci(bx0+VW/2, pBandY+bandH/2, 3, C.pPort, '#fff', 0.6));
+    }
+    if (bOpt.slot === 'exh_block') {
+      p.push(R(bx0+1, eBandY-1, VW-2, bandH+2, 0, '#8a4c32'));
+      p.push(R(bx0-1.5, eBandY-1.5, 3, bandH+3, 0, '#e02020'));
+      p.push(R(bx0+VW-1.5, eBandY-1.5, 3, bandH+3, 0, '#e02020'));
+      p.push(Ci(bx0+VW/2, eBandY+bandH/2, 3, C.ePort, '#fff', 0.6));
+    }
+  }
+  p.push('</g>');
 
   // port holes in port strip (top view)
   for(var ip=0;ip<n;ip++){
@@ -6577,9 +6702,39 @@ function renderSVG(noRecenter) {
 
   _svgVX0 = VX0; _svgVW = VW;  // ドラッグ判定用に保存
 
-  // DIN rail
-  p.push(R(BX,DIN_Y,BW,4,0,C.dinRail));
-  p.push(R(BX,DIN_Y+1,BW,1.5,0,'rgba(255,255,255,0.25)'));
+  // ── C1: 取付方法の反映（DINレール取付時のみレール描画・直接取付は取付穴）──
+  if (S.mountMethod === 'din') {
+    var dinExtra = 0;
+    var dl = parseInt(S.mountDinLen, 10);
+    if (!isNaN(dl) && dl > n) dinExtra = Math.min((dl - n) * VW * 0.4, 50);
+    p.push(R(BX-8, DIN_Y, BW+16+dinExtra, 4, 0, C.dinRail));
+    p.push(R(BX-8, DIN_Y+1, BW+16+dinExtra, 1.5, 0, 'rgba(255,255,255,0.25)'));
+    // 固定クリップ
+    p.push(R(BX+8, DIN_Y-1.5, 7, 7, 1, '#5a6c7a', '#7a8c9a', 0.5));
+    p.push(R(BX+BW-15, DIN_Y-1.5, 7, 7, 1, '#5a6c7a', '#7a8c9a', 0.5));
+    p.push(JTx(BX, DIN_Y+12,
+      'DINレール取付' + (S.mountDinLen === '0' ? '（レールなし・別途手配）'
+        : (!isNaN(dl) && dl > 0) ? '（' + dl + '連用 長尺レール）' : '（標準長）'),
+      5.5, C.sub, 'start'));
+  } else if (S.mountMethod === 'direct') {
+    p.push(Ci(BX+END_W/2, DIN_Y+2, 2.5, 'none', '#7a8c9a', 1));
+    p.push(Ci(BX+BW-END_W/2, DIN_Y+2, 2.5, 'none', '#7a8c9a', 1));
+    p.push(JTx(BX, DIN_Y+12, '直接取付（両エンドプレートの取付穴で固定）', 5.5, C.sub, 'start'));
+  }
+  // 銘板プレート（取付方法オプション AA/BA/A□/B□）
+  if (S.mountPlate) {
+    p.push(R(siX-4, SOL_Y-14, 74, 9, 1.5, '#f4f2e6', '#b8b096', 0.7));
+    p.push(JTx(siX+33, SOL_Y-7, '銘板プレート' + (S.mountPrint ? '＋連数印字' : ''), 5, '#77704f'));
+  }
+  // D3: A,Bポート口径・継手の注記（ポート列の右）
+  if (S.pipe !== '上配管' && S.abCode) {
+    var abNote = 'A,B: ' + S.abCode;
+    if (/^L/.test(S.abCode) && S.abCode !== 'LM') abNote += '（エルボ上向き）';
+    else if (/^B\d/.test(S.abCode)) abNote += '（エルボ下向き）';
+    else if (/N\d/.test(S.abCode)) abNote += '（インチ）';
+    else if (S.abCode === 'CM' || S.abCode === 'LM') abNote += '（口径混合・仕様書指示）';
+    p.push(JTx(BX+BW+4, PORT_Y+PORT_H-3, abNote, 5.5, C.abPort, 'start'));
+  }
 
   // ══════════════════════════════════
   //  VIEW 2: 正面図（配管面）
@@ -6608,6 +6763,18 @@ function renderSVG(noRecenter) {
       var aclr=isSide?C.abPort:'#304a62';
       p.push(portHole(fvcx,fAY+ROW_H/2,6,aclr,isSide?'B':null));
       p.push(portHole(fvcx,fBY+ROW_H/2,6,aclr,isSide?'A':null));
+      // D3: エルボ継手の向き（L=上向き / B=下向き）
+      if(isSide && /^L\d/.test(S.abCode||'')){
+        p.push(L(fvcx+9,fAY+ROW_H/2,fvcx+13,fAY+ROW_H/2,aclr,1.2));
+        p.push(L(fvcx+13,fAY+ROW_H/2,fvcx+13,fAY+ROW_H/2-7,aclr,1.2));
+        p.push(L(fvcx+9,fBY+ROW_H/2,fvcx+13,fBY+ROW_H/2,aclr,1.2));
+        p.push(L(fvcx+13,fBY+ROW_H/2,fvcx+13,fBY+ROW_H/2-7,aclr,1.2));
+      } else if(isSide && /^B\d/.test(S.abCode||'')){
+        p.push(L(fvcx+9,fAY+ROW_H/2,fvcx+13,fAY+ROW_H/2,aclr,1.2));
+        p.push(L(fvcx+13,fAY+ROW_H/2,fvcx+13,fAY+ROW_H/2+7,aclr,1.2));
+        p.push(L(fvcx+9,fBY+ROW_H/2,fvcx+13,fBY+ROW_H/2,aclr,1.2));
+        p.push(L(fvcx+13,fBY+ROW_H/2,fvcx+13,fBY+ROW_H/2+7,aclr,1.2));
+      }
     }
   }
 
@@ -6617,21 +6784,52 @@ function renderSVG(noRecenter) {
     p.push(Ci(fbcx,fBsY+FBASE_H/2,4,C.port,'#304858',0.8));
   }
 
-  // end plates front view — P/E ports on both sides
+  // ── B2: エンドプレート正面図 — P,Eポート取出位置・サイレンサ・外部パイロットを反映 ──
   var epFH=V2_H;
-  // left
-  p.push(R(BX,V2_TOP,END_W,epFH,2,C.end,C.endBdr,1));
-  p.push(screw(BX+END_W/2,V2_TOP+5));
-  p.push(screw(BX+END_W/2,V2_TOP+epFH-5));
-  p.push(portHole(BX+END_W/2,fAY+ROW_H/2,6,C.pPort,'P'));
-  p.push(portHole(BX+END_W/2,fBY+ROW_H/2,6,C.ePort,'E'));
-  // right
+  var epPos = document.getElementById('sel-eport') ? document.getElementById('sel-eport').value : 'U';
+  var epSil = (EPORT_SPECIAL_WIRINGS.indexOf(S.wiring) >= 0) ? (S.eportPilot === 'sil') : (S.eportAssy === 'S');
+  var epExt = (EPORT_SPECIAL_WIRINGS.indexOf(S.wiring) >= 0) ? (S.eportPilot === 'ext')
+            : (S.base === 'metal' ? S.eportAssy === 'R' : S.eportAssy === 'R');
+  var accSil = (S.manifestOpts && S.manifestOpts.silencer > 0) ? (S.silencerSide || '') : '';
+  function drawEndPlateFront(x, active, sideCode, silOut) {
+    p.push(R(x, V2_TOP, END_W, epFH, 2, C.end, C.endBdr, 1));
+    p.push(screw(x+END_W/2, V2_TOP+5));
+    p.push(screw(x+END_W/2, V2_TOP+epFH-5));
+    var cxp = x + END_W/2;
+    if (active) {
+      p.push(portHole(cxp, fAY+ROW_H/2, 6, C.pPort, 'P'));
+      if (epSil) {
+        // サイレンサ内蔵: 3/5(E)ポートはプラグ＋内蔵マフラ表現
+        p.push(xmark(cxp, fBY+ROW_H/2, 5));
+        p.push(R(cxp-10, fBY+ROW_H/2+9, 20, 5, 2.5, '#5a6674', '#8a96a4', 0.6));
+        for (var sm = 0; sm < 3; sm++) p.push(L(cxp-6+sm*6, fBY+ROW_H/2+9, cxp-6+sm*6, fBY+ROW_H/2+14, '#8a96a4', 0.5));
+        p.push(Tx(cxp, fBY+ROW_H/2+22, 'SIL内蔵', 4.5, '#7a8694'));
+      } else {
+        p.push(portHole(cxp, fBY+ROW_H/2, 6, C.ePort, 'E'));
+        // Step10 サイレンサ付属品（AN□-C□）を装着側の外側に描画
+        if (silOut) {
+          var sox = (sideCode === 'D側') ? (x - 18) : (x + END_W + 1);
+          p.push(R(sox, fBY+ROW_H/2-4, 17, 8, 4, '#68747f', '#98a4b0', 0.7));
+          for (var so = 0; so < 3; so++) p.push(L(sox+4+so*4.5, fBY+ROW_H/2-4, sox+4+so*4.5, fBY+ROW_H/2+4, '#98a4b0', 0.5));
+          p.push(JTx(sox+8, fBY+ROW_H/2+13, 'サイレンサ', 4.5, '#7a8694'));
+        }
+      }
+      if (epExt) {
+        p.push(portHole(cxp, fBsY+FBASE_H/2, 4, '#b8a020', 'X'));
+        p.push(JTx(cxp, fBsY+FBASE_H+7, '外部pilot', 4.5, '#9a8a30'));
+      }
+    } else {
+      // 取出なし側: プラグ済み表現
+      p.push(xmark(cxp, fAY+ROW_H/2, 5));
+      p.push(xmark(cxp, fBY+ROW_H/2, 5));
+      p.push(JTx(cxp, fBsY+6, 'プラグ', 4.5, '#66788a'));
+    }
+    p.push(JTx(cxp, V2_TOP-3, sideCode, 5.5, C.sub));
+  }
   var epRX2=BX+END_W+totalVW;
-  p.push(R(epRX2,V2_TOP,END_W,epFH,2,C.end,C.endBdr,1));
-  p.push(screw(epRX2+END_W/2,V2_TOP+5));
-  p.push(screw(epRX2+END_W/2,V2_TOP+epFH-5));
-  p.push(portHole(epRX2+END_W/2,fAY+ROW_H/2,6,C.pPort,'P'));
-  p.push(portHole(epRX2+END_W/2,fBY+ROW_H/2,6,C.ePort,'E'));
+  // 左＝D側 / 右＝U側
+  drawEndPlateFront(BX,   epPos==='D'||epPos==='B', 'D側', !epSil && (accSil==='D'||accSil==='B') && (epPos==='D'||epPos==='B'));
+  drawEndPlateFront(epRX2, epPos==='U'||epPos==='B', 'U側', !epSil && (accSil==='U'||accSil==='B') && (epPos==='U'||epPos==='B'));
 
   // SI unit front view
   p.push(R(siX,V2_TOP,SI_W,V2_H,3,C.si,C.siBdr,1));
@@ -6657,6 +6855,39 @@ function renderSVG(noRecenter) {
   p.push(R(BX, dinBarY, BW, 4, 0, C.dinRail));
   p.push(R(BX, dinBarY+1, BW, 1.5, 0, 'rgba(255,255,255,0.25)'));
   p.push(JTx(BX+BW/2, dinBarY+14, 'DIN RAIL (option)', 6.5, C.sub));
+
+  // ── C2: 寸法参考線（バルブ搭載部＝カタログ寸法式のピッチ×連数）──
+  if (S.base !== 'mixed') {
+    var pitchMm = ({ '3': 10.5, '5': 16, '7': 19 })[S.series];
+    if (pitchMm) {
+      var dimY = V2_TOP + V2_H + 13;
+      p.push(L(VX0, dimY, VX0+totalVW, dimY, '#8a9ab0', 0.8));
+      p.push(L(VX0, dimY-3.5, VX0, dimY+3.5, '#8a9ab0', 0.8));
+      p.push(L(VX0+totalVW, dimY-3.5, VX0+totalVW, dimY+3.5, '#8a9ab0', 0.8));
+      p.push(JTx(VX0+totalVW/2, dimY-3,
+        'バルブ搭載部 ' + (pitchMm*n).toFixed(1) + 'mm（ピッチ' + pitchMm + '×' + n + '連）＋配線部・エンド分',
+        5.5, '#5a6a80'));
+    }
+  } else {
+    p.push(JTx(VX0, V2_TOP+V2_H+13, '※混合取付: SY大小バルブ混載（連別サイズは仕様書で指示・図は等幅表示）', 5.5, '#5a6a80', 'start'));
+  }
+
+  // ── D2: 凡例 ──
+  (function drawLegend(){
+    var lgY = V2_TOP + V2_H + 27;
+    var lx = BX;
+    function swatch(w2, h2, fill, stroke) { var s = R(lx, lgY-h2+1, w2, h2, 1, fill, stroke, 0.5); lx += w2 + 3; return s; }
+    function ltext(t) { var s = JTx(lx, lgY, t, 5.5, '#5a6a80', 'start'); lx += t.length * 5.8 + 10; return s; }
+    p.push(JTx(lx, lgY, '凡例:', 6, C.sub, 'start')); lx += 26;
+    p.push(swatch(10, 5, 'rgba(70,140,220,0.55)')); p.push(ltext('P供給'));
+    p.push(swatch(10, 5, 'rgba(220,110,70,0.5)')); p.push(ltext('E排気'));
+    p.push(swatch(4, 8, '#e02020')); p.push(ltext('回路分断'));
+    p.push(swatch(9, 8, '#e2eef8', '#7aa8d0')); p.push(ltext('1=シングル配線'));
+    p.push(swatch(9, 8, '#fde8d8', '#d09060')); p.push(ltext('2=ダブル配線(2点)'));
+    p.push(Ci(lx+3, lgY-3, 3, '#35d07a')); lx += 9; p.push(ltext('ランプ付'));
+    p.push(Ci(lx+4, lgY-3, 4.5, '#5a4a90', '#9a8ad0', 0.8)); p.push(Tx(lx+4, lgY-0.8, 'C', 4.5, '#efe8ff')); lx += 12; p.push(ltext('3位置センタ種別'));
+    p.push(swatch(10, 8, '#95a5b2')); p.push(ltext('ブランキング'));
+  })();
 
   // ── 増連＋ボタン（右エンドプレートの右横・クリックで1連追加）──
   (function(){
