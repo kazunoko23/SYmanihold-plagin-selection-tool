@@ -4802,8 +4802,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // ── Drag-to-pan ──
     var _panActive = false, _panStartX = 0, _panStartY = 0, _panScrollX = 0, _panScrollY = 0;
     area.addEventListener('mousedown', function(e) {
-      if (e.button !== 0) return;
-      if (e.target.closest && e.target.closest('g[onclick]')) return;
+      // 左ボタン=背景のみパン / 中ボタン(ホイールクリック)=どこでもパン
+      if (e.button !== 0 && e.button !== 1) return;
+      if (e.button === 0 && e.target.closest && e.target.closest('g[onclick]')) return;
       _panActive = true;
       _panStartX = e.clientX;
       _panStartY = e.clientY;
