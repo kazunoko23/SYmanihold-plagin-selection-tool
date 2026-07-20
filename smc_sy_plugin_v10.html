@@ -301,6 +301,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
 
 /* ─── Drag ghost ─── */
 .vdrag-ghost{position:fixed;pointer-events:none;z-index:1200;background:#0d2244;border:2px solid #5ab4ff;border-radius:5px;padding:5px 12px;font-size:10px;font-family:var(--mono);color:#7dd3fc;display:none;white-space:nowrap;box-shadow:0 6px 20px rgba(0,0,0,0.5);}
+
+/* ─── SMC WEB catalog link button ─── */
+.wbtn{display:inline-block;padding:3px 10px;border:1px solid #2a6db5;border-radius:4px;color:#2a6db5;text-decoration:none;font-size:12px;background:#f4f9ff}
+.wbtn:hover{background:#2a6db5;color:#fff}
+.wbtn.sm{margin-left:8px;padding:1px 8px;font-size:11px;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -602,6 +607,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
     <div class="pn-label">生成品番 — PART NUMBER</div>
     <div class="pn-row">
       <div class="pn-main incomplete" id="pn-main">SS5Y□ — □□□□ — □□U/D — □□</div>
+      <span id="pn-webbtn"></span>
       <div id="pn-status-tag"><span class="pn-tag wip">選定中</span></div>
       <button class="pn-copy" onclick="copyPN()">📋 コピー</button>
     </div>
@@ -685,6 +691,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
         <div class="ve-pn-box">
           <div class="ve-pn-lbl">▶ バルブ品番</div>
           <div class="ve-pn-val" id="ve-pn-val">—</div>
+          <span id="ve-pn-web"></span>
           <button class="ve-copy-btn" onclick="vecopypn()">📋 コピー</button>
         </div>
       </div>
@@ -4056,7 +4063,10 @@ function veBulkApply() {
 }
 
 function updateVePn(idx) {
-  document.getElementById('ve-pn-val').textContent = getValvePN(idx);
+  var vePn = getValvePN(idx);
+  document.getElementById('ve-pn-val').textContent = vePn;
+  var veWeb = document.getElementById('ve-pn-web');
+  if (veWeb) veWeb.innerHTML = webBtn(vePn);
   // 下部バルブPNバーも即時更新
   updateValvePNBar();
   // バルブ一覧ポップアップが開いていれば更新
@@ -6136,18 +6146,21 @@ function updatePN() {
     }
   }
 
+  const webEl = document.getElementById('pn-webbtn');
   if (!res) {
     mainEl.textContent = 'SS5Y□ — □□□□ — □□U/D — □□';
     mainEl.className = 'pn-main incomplete';
     tagEl.innerHTML = '<span class="pn-tag wip">選定中</span>';
     segsEl.innerHTML = '';
     notesSec.style.display='none';
+    if (webEl) webEl.innerHTML = '';
     return;
   }
 
   const pnOk = res.complete && !solOver;
   mainEl.textContent = res.full;
   mainEl.className = 'pn-main' + (pnOk ? '' : ' incomplete');
+  if (webEl) webEl.innerHTML = pnOk ? webBtn(res.full) : '';
   tagEl.innerHTML = pnOk
     ? '<span class="pn-tag ok">● 品番確定</span>'
     : solOver && res.complete
@@ -6906,6 +6919,12 @@ function renderSVG(noRecenter) {
 // ════════════════════════════════════════════════════
 // UTILS
 // ════════════════════════════════════════════════════
+// SMC WEBカタログ 品番詳細リンクボタン（英数字とハイフンのみの品番に表示）
+function webBtn(pn) {
+  if (!pn || !/^[A-Za-z0-9-]+$/.test(pn)) return '';
+  return '<a class="wbtn sm" target="_blank" rel="noopener" onclick="event.stopPropagation()" href="https://www.smcworld.com/webcatalog/s3s/ja-jp/detail/?partNumber='+encodeURIComponent(pn)+'">SMC WEB ↗</a>';
+}
+
 function copyPN() {
   const res = buildPN();
   if (!res) return;
@@ -7409,7 +7428,7 @@ function renderValveAllPopup() {
     var selCls = (i === _vpIdx) ? ' vap-selected' : '';
     html += '<div class="vap-row' + selCls + '" onclick="openValvePopover(' + i + ');closeValveAllPopup();">'
       + '<div class="vap-idx">' + (i+1) + '</div>'
-      + '<div class="vap-pn ' + cls + '">' + (pn || '—') + '</div>'
+      + '<div class="vap-pn ' + cls + '">' + (pn || '—') + webBtn(pn) + '</div>'
       + '</div>';
   }
   body.innerHTML = html;
