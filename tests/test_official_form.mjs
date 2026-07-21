@@ -8,7 +8,7 @@ import { dirname, join } from 'path';
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, '..', 'smc_sy_plugin_v10.html'), 'utf8');
 const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-const appJs = blocks[blocks.length - 1];
+const appJs = blocks.find(b => b.includes("function buildPN")); // アプリ本体（XLSXライブラリ・オンボーディング等を除外）
 
 const templatePath = process.argv[2] || 'C:/Users/mtyf2/Downloads/SS5Y3-10S6-B.xlsx';
 const outPath = process.argv[3] || join(here, 'out_filled.xlsx');

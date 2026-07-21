@@ -4027,6 +4027,8 @@ function veSet(idx, field, value) {
     updatePN();
   }
   renderVeIndBody(idx);
+  // 個別仕様マーク（ランプLED/節電T/ねじH等）をSVGに即時反映
+  renderSVG(true);
 }
 
 function veBulkSet(field, value) {
@@ -4060,6 +4062,9 @@ function veBulkApply() {
   done.style.display = 'block';
   setTimeout(function(){ done.style.display='none'; }, 2000);
   if (_vpIdx >= 0) renderVeIndBody(_vpIdx);
+  // 一括適用結果をバルブ品番バー・SVG個別仕様マークに即時反映
+  updateValvePNBar();
+  renderSVG(true);
 }
 
 function updateVePn(idx) {
@@ -6667,7 +6672,7 @@ function renderSVG(noRecenter) {
     }
 
     // selection ring
-    if(isSel) p.push(R(vx,SOL_Y,VW,SOL_H+BODY_H,'none','none','#2a70c8',2));
+    if(isSel) p.push(R(vx,SOL_Y,VW,SOL_H+BODY_H,0,'none','#2a70c8',2));
 
     p.push('</g>');
   }

@@ -10,7 +10,7 @@ const html = readFileSync(join(here, '..', 'smc_sy_plugin_v10.html'), 'utf8');
 
 // 最後の<script>ブロック＝アプリ本体（先頭側はXLSXライブラリ）
 const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-const appJs = blocks[blocks.length - 1];
+const appJs = blocks.find(b => b.includes("function buildPN")); // アプリ本体（XLSXライブラリ・オンボーディング等を除外）
 
 // ─── DOMスタブ ───
 const elements = {};
