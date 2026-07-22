@@ -6119,7 +6119,46 @@ function updateSolMeter() {
   if (vsub) vsub.textContent = '最大' + lim.st + '連';
 }
 
+// ═══ 制約サニタイズ ═══
+// シリーズ/ベース切替・SIユニット変更・構成読込で残留したカタログ非対応の
+// 選択を即時補正する（個別パネルを開くまで不正品番がPN/Excelに出るのを防ぐ）
+function sanitizeAllValves() {
+  if (!S.series) return;
+  // A,Bポート口径: 現在のベース×配管×シリーズの対応口径外なら再選択に戻す
+  // （混合取付は2桁口径C86等のため対象外）
+  if (S.base !== 'mixed') {
+    var abKey = S.base + '_' + S.pipe + '_' + S.series;
+    var cmp = AB_COMPAT[abKey];
+    if (cmp && S.abCode && S.abCode !== 'CM' && S.abCode !== 'LM') {
+      var validAb = (cmp.ST || []).concat(cmp.EL || [], cmp.SCREW || []);
+      if (/^(C\d+|M5|0\d)$/.test(S.abCode) && validAb.indexOf(S.abCode) < 0) S.abCode = null;
+    }
+  }
+  // バルブ個別: スペーサ口径・SI極性連動のランプ/コモン補正
+  var sizes = getOptSizes(S.series);
+  var siR = getSiCommonRestriction();
+  for (var i = 0; i < (S.valveCount || 0); i++) {
+    var spec = getValveSpec(i);
+    if (!spec) continue;
+    var o = spec.manifoldOpt;
+    if (o) {
+      if (o.supSpacerSize && sizes.indexOf(o.supSpacerSize) < 0) o.supSpacerSize = sizes[0];
+      if (o.exhSpacerSize && sizes.indexOf(o.exhSpacerSize) < 0) o.exhSpacerSize = sizes[0];
+      if (o.slotSize && sizes.indexOf(o.slotSize) < 0) o.slotSize = sizes[0];
+    }
+    if (siR === 'N' && spec.lampCommon !== 'N') {
+      spec.lampCommon = 'N'; spec.lampLamp = false;
+      spec.lamp = deriveLampCode(false, spec.lampSurge, 'N');
+    }
+    if (siR === 'P' && spec.lampCommon !== 'NM') {
+      spec.lampCommon = 'NM'; spec.lampLamp = false;
+      spec.lamp = deriveLampCode(false, spec.lampSurge, 'NM');
+    }
+  }
+}
+
 function updatePN() {
+  sanitizeAllValves();
   updateSubPortBadge();
   renderEportWrap();
   updateMetalPeWrap();
