@@ -3664,33 +3664,28 @@ function veCommonElecRows(idx, spec) {
   }
 
   // ── ランプ/サージ/コモン 3段階 ──
+  // カタログp.434の記号表: 無記号=保護なし(無極性のみ) / R,S,NS=サージのみ / U,Z,NZ=ランプ+サージ
+  // 「ランプのみ(サージなし)」の組合せは存在しない。コモン仕様時・ランプ付時はサージ必須。
+  // 節電(T)時はZ/NZ（コモン必須・ランプ+サージ付）
   var common   = spec.lampCommon  || '';
   var hasLamp  = !!spec.lampLamp;
   var hasSurge = !!spec.lampSurge;
-  var isCommon = common === 'N' || common === 'NM'; // コモン時はランプ不可
-  // 節電コイル(T)選択時: Z/NZのみ → コモン必須・サージ必須・ランプ不可
+  var isCommon = common === 'N' || common === 'NM';
   var isSetsuden = spec.coil === 'T';
 
   // SIユニット コモン制約
   var siRestrict = getSiCommonRestriction(); // 'N'=NPN固定 / 'P'=PNP固定 / null=制約なし
-  // SI制約がある場合は自動でlampCommonを設定
-  if (siRestrict === 'N' && common !== 'N') {
-    spec.lampCommon = common = 'N'; isCommon = true;
-    spec.lamp = deriveLampCode(hasLamp, hasSurge, 'N');
-  }
-  if (siRestrict === 'P' && common !== 'NM') {
-    spec.lampCommon = common = 'NM'; isCommon = true;
-    spec.lamp = deriveLampCode(false, hasSurge, 'NM'); // コモン時はランプなし
-    hasLamp = false; spec.lampLamp = false;
-  }
+  if (siRestrict === 'N' && common !== 'N')  { spec.lampCommon = common = 'N';  isCommon = true; }
+  if (siRestrict === 'P' && common !== 'NM') { spec.lampCommon = common = 'NM'; isCommon = true; }
 
-  // 節電時は状態を強制補正
+  // 節電時: Z/NZ固定（コモン必須・ランプ+サージ付）
   if (isSetsuden) {
-    if (!isCommon) { spec.lampCommon = common = 'N'; isCommon = true; }
-    if (spec.lampLamp)  { spec.lampLamp  = false; hasLamp  = false; }
-    if (!spec.lampSurge){ spec.lampSurge = true;  hasSurge = true;  }
-    spec.lamp = deriveLampCode(false, true, common);
+    if (!isCommon) { spec.lampCommon = common = (siRestrict === 'P' ? 'NM' : 'N'); isCommon = true; }
+    if (!spec.lampLamp) { spec.lampLamp = hasLamp = true; }
   }
+  // コモン仕様時・ランプ付時はサージ必須
+  if ((isCommon || hasLamp) && !spec.lampSurge) { spec.lampSurge = hasSurge = true; }
+  spec.lamp = deriveLampCode(hasLamp, hasSurge, common);
 
   html += '<div class="ve-sttl" style="margin-top:6px;">ランプ・サージ・コモン仕様</div>';
   if (siRestrict) {
@@ -3703,7 +3698,7 @@ function veCommonElecRows(idx, spec) {
   if (isSetsuden) {
     html += '<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.3);border-radius:5px;padding:5px 10px;margin-bottom:6px;font-size:9px;color:#7c3aed;line-height:1.5;">'
           + '⚡ 節電回路（T）選択時はZ / NZのみ選択可<br>'
-          + '（コモン仕様必須・サージ保護固定・ランプ不可）</div>';
+          + '（コモン仕様必須・ランプ＋サージ電圧保護回路付固定）</div>';
   }
 
   // ① コモン仕様
@@ -3725,61 +3720,66 @@ function veCommonElecRows(idx, spec) {
     html += '<div class="ve-note" style="padding-left:75px;">※節電時はコモン仕様必須（無極性は選択不可）</div>';
   }
 
-  // ② ランプ付き（コモン時・節電時は選択不可）
+  // ② ランプ付き（節電時は「あり」固定。コモン時も選択可＝Z/NZとS/NSの切替）
   html += '<div class="ve-row"><div class="ve-lbl">ランプ付き</div><div class="ve-btns">';
   [{v:false, l:'なし'}, {v:true, l:'あり'}].forEach(function(o) {
     var sel = hasLamp === o.v;
-    var dis = (isCommon || isSetsuden) && o.v === true;
+    var dis = isSetsuden && o.v === false;
     html += '<div class="ve-btn' + (sel?' sel':'') + (dis?' ng':'') + '" '
           + (dis ? '' : 'data-vidx="' + idx + '" data-field="lampLamp" data-val="' + o.v + '"')
           + '>' + o.l + '</div>';
   });
   html += '</div></div>';
-  if (isSetsuden) html += '<div class="ve-note" style="padding-left:75px;">※節電時はランプなし固定</div>';
-  else if (isCommon) html += '<div class="ve-note" style="padding-left:75px;">※コモン仕様時はランプなし固定</div>';
+  if (isSetsuden) html += '<div class="ve-note" style="padding-left:75px;">※節電時はランプ付き（Z/NZ）固定</div>';
 
-  // ③ サージ電圧保護回路（節電時は「あり」固定）
+  // ③ サージ電圧保護回路（コモン時・ランプ付時・節電時は「あり」固定）
+  var surgeForced = isSetsuden || isCommon || hasLamp;
   html += '<div class="ve-row"><div class="ve-lbl">サージ保護回路</div><div class="ve-btns">';
   [{v:false, l:'なし'}, {v:true, l:'あり'}].forEach(function(o) {
     var sel = hasSurge === o.v;
-    var dis = isSetsuden && o.v === false; // 節電時: なし不可
+    var dis = surgeForced && o.v === false;
     html += '<div class="ve-btn' + (sel?' sel':'') + (dis?' ng':'') + '" '
           + (dis ? '' : 'data-vidx="' + idx + '" data-field="lampSurge" data-val="' + o.v + '"')
           + '>' + o.l + '</div>';
   });
   html += '</div></div>';
-  if (isSetsuden) html += '<div class="ve-note" style="padding-left:75px;">※節電時はサージ保護回路あり固定</div>';
+  if (surgeForced) html += '<div class="ve-note" style="padding-left:75px;">※' + (isSetsuden ? '節電時' : isCommon ? 'コモン仕様時' : 'ランプ付時') + 'はサージ保護回路あり固定（ランプのみの設定はありません）</div>';
 
   // 品番コードバッジ
   var code = deriveLampCode(hasLamp, hasSurge, common);
-  var codeDesc = code==='R'?'ランプ付':code==='U'?'サージ保護':code==='S'?'ランプ+サージ':code==='Z'?'サージ+プラスコモン':code==='NS'?'プラスコモン':code==='NZ'?'サージ+マイナスコモン':'標準（なし）';
+  var codeDesc = lampCodeDesc(code);
   html += '<div style="margin:4px 0 2px;display:flex;align-items:center;gap:8px;">'
         + '<span style="font-size:9px;color:#94a3b8;">品番コード:</span>'
         + '<span style="font-family:var(--mono);font-size:14px;font-weight:800;color:var(--blue);">' + (code || '無記号') + '</span>'
         + '<span style="font-size:9px;color:#94a3b8;">' + codeDesc + '</span></div>';
 
   html += veBtnRow(idx,'manual','マニュアル',[
-    {v:'',l:'NL'},{v:'D',l:'D(ドライバ)'},{v:'E',l:'E(手動)'},{v:'F',l:'F(スライド)'}
-  ], spec.manual||'');
+    {v:'',l:'NL'},{v:'D',l:'D(ドライバ)'},{v:'E',l:'E(手動)'},{v:'F',l:'F(スライド)'},{v:'G',l:'G(安全スライドロック)'}
+  ], spec.manual||'', spec.manual==='G' ? '※安全スライドロックマニュアル: 詳細はカタログp.423参照' : null);
   return html;
 }
 
 
-// ランプ/サージ/コモン → 品番コード変換
-// 無極性: なし='', ランプ='R', サージ='U', 両方='S'
-// プラスコモン: サージなし='NS', サージあり='Z'
+// 品番コード→説明（カタログp.434準拠）
+function lampCodeDesc(code) {
+  return code==='R'?'サージ保護（無極性）'
+       : code==='U'?'ランプ＋サージ保護（無極性）'
+       : code==='S'?'サージ保護（プラスコモン）'
+       : code==='Z'?'ランプ＋サージ保護（プラスコモン）'
+       : code==='NS'?'サージ保護（マイナスコモン）'
+       : code==='NZ'?'ランプ＋サージ保護（マイナスコモン）'
+       : '標準（保護回路なし）';
+}
+
+// ランプ/サージ/コモン → 品番コード変換（カタログp.434記号表準拠）
+// 無記号=保護なし(無極性のみ) / R,S,NS=サージのみ / U,Z,NZ=ランプ+サージ
 // マイナスコモン: サージあり='NZ' (ランプは無極性のみ)
 function deriveLampCode(lampLamp, lampSurge, lampCommon) {
-  if (lampCommon === 'N') {  // プラスコモン
-    return lampSurge ? 'Z' : 'NS';
-  }
-  if (lampCommon === 'NM') { // マイナスコモン
-    return lampSurge ? 'NZ' : 'NZ'; // マイナスコモン+サージなしは通常NZと同等（仕様書に記載なし→NZのみ）
-  }
+  if (lampCommon === 'N')  return lampLamp ? 'Z'  : 'S';   // プラスコモン（サージ必須）
+  if (lampCommon === 'NM') return lampLamp ? 'NZ' : 'NS';  // マイナスコモン（サージ必須）
   // 無極性
-  if (lampLamp && lampSurge) return 'S';
-  if (lampLamp)  return 'R';
-  if (lampSurge) return 'U';
+  if (lampLamp)  return 'U';   // ランプ付は必ずサージ付（U）
+  if (lampSurge) return 'R';   // サージのみ
   return '';
 }
 
@@ -3988,27 +3988,30 @@ function renderVeBulkBody() {
   html += '</div></div>';
 
   html += '<div class="ve-row"><div class="ve-lbl">ランプ付き</div><div class="ve-btns">';
-  var isBulkCommon = spec.lampCommon === 'N' || spec.lampCommon === 'NM';
   [{v:false,l:'なし'},{v:true,l:'あり'}].forEach(function(o) {
     var sel = !!spec.lampLamp === o.v;
-    var dis = isBulkCommon && o.v === true;
-    html += '<div class="ve-btn' + (sel?' sel':'') + (dis?' ng':'') + '" '
-          + (dis ? '' : 'data-bfield="lampLamp" data-bval="' + o.v + '"')
-          + '>' + o.l + '</div>';
+    html += '<div class="ve-btn' + (sel?' sel':'') + '" data-bfield="lampLamp" data-bval="' + o.v + '">' + o.l + '</div>';
   });
   html += '</div></div>';
 
+  var isBulkCommon = spec.lampCommon === 'N' || spec.lampCommon === 'NM';
+  var bulkSurgeForced = isBulkCommon || !!spec.lampLamp;
   html += '<div class="ve-row"><div class="ve-lbl">サージ保護回路</div><div class="ve-btns">';
   [{v:false,l:'なし'},{v:true,l:'あり'}].forEach(function(o) {
     var sel = !!spec.lampSurge === o.v;
-    html += '<div class="ve-btn' + (sel?' sel':'') + '" data-bfield="lampSurge" data-bval="' + o.v + '">' + o.l + '</div>';
+    var dis = bulkSurgeForced && o.v === false;
+    html += '<div class="ve-btn' + (sel?' sel':'') + (dis?' ng':'') + '" '
+          + (dis ? '' : 'data-bfield="lampSurge" data-bval="' + o.v + '"')
+          + '>' + o.l + '</div>';
   });
   html += '</div></div>';
+  if (bulkSurgeForced) html += '<div class="ve-note">※コモン仕様時・ランプ付時はサージ保護回路あり固定（ランプのみの設定はありません）</div>';
 
   var bCode = deriveLampCode(!!spec.lampLamp, !!spec.lampSurge, spec.lampCommon||'');
   html += '<div style="margin:4px 0 2px;display:flex;align-items:center;gap:8px;">'
         + '<span style="font-size:9px;color:#94a3b8;">品番コード:</span>'
         + '<span style="font-family:var(--mono);font-size:14px;font-weight:800;color:var(--blue);">' + (bCode||'無記号') + '</span>'
+        + '<span style="font-size:9px;color:#94a3b8;">' + lampCodeDesc(bCode) + '</span>'
         + '</div>';
 
   // ── バルブ仕様（一括・個別共通）──
@@ -4016,7 +4019,7 @@ function renderVeBulkBody() {
   html += veMkBulkRow('シール方式','seal',[{v:'0',l:'弾性体'},{v:'1',l:'メタル'}], spec);
   html += veMkBulkRow('コイル仕様','coil',[{v:'',l:'標準'},{v:'T',l:'T(節電)'}], spec);
   html += veMkBulkRow('マニュアル','manual',[
-    {v:'',l:'NL'},{v:'D',l:'D(ドライバ)'},{v:'E',l:'E(手動)'},{v:'F',l:'F(スライド)'}
+    {v:'',l:'NL'},{v:'D',l:'D(ドライバ)'},{v:'E',l:'E(手動)'},{v:'F',l:'F(スライド)'},{v:'G',l:'G(安全スライドロック)'}
   ], spec);
 
   // ── 取付ねじ（一括のみ）──
@@ -4064,12 +4067,12 @@ function veSet(idx, field, value) {
   }
   if (field === 'seal' && value === '0') { if (spec.pilotOpt==='K') spec.pilotOpt=''; }
   if (field === 'portSize' && value === 'M5') spec.portScrew = '';
-  // 節電コイル(T)選択時: コモン・サージを強制設定
+  // 節電コイル(T)選択時: Z/NZ固定（コモン必須・ランプ+サージ付）
   if (field === 'coil' && value === 'T') {
     if (!spec.lampCommon) spec.lampCommon = 'N'; // コモン未選択なら プラスコモン に
-    spec.lampLamp  = false;  // ランプなし固定
+    spec.lampLamp  = true;   // ランプ付固定（Z/NZはランプ+サージ付）
     spec.lampSurge = true;   // サージあり固定
-    spec.lamp = deriveLampCode(false, true, spec.lampCommon);
+    spec.lamp = deriveLampCode(true, true, spec.lampCommon);
   }
   // 節電解除時: 強制状態をリセット
   if (field === 'coil' && value !== 'T') {
@@ -4077,9 +4080,9 @@ function veSet(idx, field, value) {
   }
   // ランプ/サージ/コモン変更時: spec.lamp を自動更新
   if (field === 'lampLamp' || field === 'lampSurge' || field === 'lampCommon') {
-    // コモンがN/NM時はランプなしに強制
-    if ((spec.lampCommon === 'N' || spec.lampCommon === 'NM') && spec.lampLamp) {
-      spec.lampLamp = false;
+    // コモン仕様時・ランプ付時はサージ必須（カタログp.434: ランプのみの設定はない）
+    if ((spec.lampCommon === 'N' || spec.lampCommon === 'NM' || spec.lampLamp) && !spec.lampSurge) {
+      spec.lampSurge = true;
     }
     spec.lamp = deriveLampCode(spec.lampLamp, spec.lampSurge, spec.lampCommon);
   }
@@ -4102,7 +4105,8 @@ function veBulkSet(field, value) {
   // コモン/ランプ/サージ変更時: lamp コードを自動更新
   if (field === 'lampLamp' || field === 'lampSurge' || field === 'lampCommon') {
     var bs = S.bulkSpec;
-    if ((bs.lampCommon === 'N' || bs.lampCommon === 'NM') && bs.lampLamp) bs.lampLamp = false;
+    // コモン仕様時・ランプ付時はサージ必須
+    if ((bs.lampCommon === 'N' || bs.lampCommon === 'NM' || bs.lampLamp) && !bs.lampSurge) bs.lampSurge = true;
     bs.lamp = deriveLampCode(bs.lampLamp, bs.lampSurge, bs.lampCommon||'');
   }
   renderVeBulkBody();
@@ -6244,23 +6248,23 @@ function parseValvePNText(raw) {
   var typeMap = { '1':'single','2':'double','3':'3cs','4':'3es','5':'3ps','A':'4pos','B':'dual','C':'3port' };
   var lampRe = '(NZ|NS|Z|S|R|U)?';
   // 残圧排気弁付（…-5U1E）
-  if ((m = pn.match(new RegExp('^SY([57])30([01])([BK]?)(T?)-([56])' + lampRe + '(D|E|F)?1E(?:-([BKH]))?$')))) {
+  if ((m = pn.match(new RegExp('^SY([57])30([01])([BK]?)(T?)-([56])' + lampRe + '(D|E|F|G)?1E(?:-([BKH]))?$')))) {
     return { series: m[1], special: 'residual', type: '3cs', seal: m[2], pilotOpt: m[3], coil: m[4],
              voltage: m[5], lamp: m[6] || '', manual: m[7] || '', screw: m[8] || '' };
   }
   // 真空対応（SY□A0R…）
-  if ((m = pn.match(new RegExp('^SY([357])A([03])R(T?)-([56])' + lampRe + '(D|E|F)?1(?:-([A-Z0-9]+))?(?:-([BKH]))?$')))) {
+  if ((m = pn.match(new RegExp('^SY([357])A([03])R(T?)-([56])' + lampRe + '(D|E|F|G)?1(?:-([A-Z0-9]+))?(?:-([BKH]))?$')))) {
     return { series: m[1], special: 'vacuum', type: 'single', coil: m[3], voltage: m[4], lamp: m[5] || '',
              manual: m[6] || '', vacBport: m[7] || '', screw: m[8] || '' };
   }
   // 圧力センサ付き（…-P□）
-  if ((m = pn.match(new RegExp('^SY([57])([12345ABC])3([01])(R?)(H?)([BK]?)(T?)-([56])' + lampRe + '(D|E|F)?1-C6([FN]?)(?:-([BKH]))?-P([1-9])$')))) {
+  if ((m = pn.match(new RegExp('^SY([57])([12345ABC])3([01])(R?)(H?)([BK]?)(T?)-([56])' + lampRe + '(D|E|F|G)?1-C6([FN]?)(?:-([BKH]))?-P([1-9])$')))) {
     return { series: m[1], special: 'pressure', type: typeMap[m[2]], seal: m[3], pilot: m[4] ? 'R' : '',
              backpress: m[5], pilotOpt: m[6], coil: m[7], voltage: m[8], lamp: m[9] || '', manual: m[10] || '',
              portScrew: m[11] || '', screw: m[12] || '', sensorCount: m[13] };
   }
   // 通常バルブ
-  if ((m = pn.match(new RegExp('^SY([357])([12345ABC])([03])([01])(R?)(H?)([BK]?)(T?)-([56])' + lampRe + '(D|E|F)?1(?:-(C\\d+|N\\d+|M5|0[123])([FN]?))?(?:-([BKH]))?(?:-X90)?$')))) {
+  if ((m = pn.match(new RegExp('^SY([357])([12345ABC])([03])([01])(R?)(H?)([BK]?)(T?)-([56])' + lampRe + '(D|E|F|G)?1(?:-(C\\d+|N\\d+|M5|0[123])([FN]?))?(?:-([BKH]))?(?:-X90)?$')))) {
     return { series: m[1], type: typeMap[m[2]], upper: m[3] === '3', seal: m[4], pilot: m[5] ? 'R' : '',
              backpress: m[6], pilotOpt: m[7], coil: m[8], voltage: m[9], lamp: m[10] || '', manual: m[11] || '',
              portSize: m[12] || '', portScrew: m[13] || '', screw: m[14] || '', fluoroRubber: /-X90$/.test(pn) };
@@ -6325,9 +6329,9 @@ function applyValveCsv(text) {
     if (r.fluoroRubber) spec.fluoroRubber = true;
     // lamp分解（UI用のlampLamp/lampSurge/lampCommonに反映）
     var lc = r.lamp || '';
-    spec.lampCommon = (lc === 'Z' || lc === 'NS') ? 'N' : (lc === 'NZ') ? 'NM' : '';
-    spec.lampLamp   = (lc === 'R' || lc === 'S');
-    spec.lampSurge  = (lc === 'U' || lc === 'S' || lc === 'Z' || lc === 'NZ');
+    spec.lampCommon = (lc === 'S' || lc === 'Z') ? 'N' : (lc === 'NS' || lc === 'NZ') ? 'NM' : '';
+    spec.lampLamp   = (lc === 'U' || lc === 'Z' || lc === 'NZ');
+    spec.lampSurge  = lc !== '';
     if (spec.manifoldOpt && spec.manifoldOpt.slot === 'blanking') spec.manifoldOpt.slot = null;
     okCount++;
   }
@@ -6628,12 +6632,12 @@ function sanitizeAllValves() {
       if (o.slotSize && sizes.indexOf(o.slotSize) < 0) o.slotSize = sizes[0];
     }
     if (siR === 'N' && spec.lampCommon !== 'N') {
-      spec.lampCommon = 'N'; spec.lampLamp = false;
-      spec.lamp = deriveLampCode(false, spec.lampSurge, 'N');
+      spec.lampCommon = 'N'; spec.lampSurge = true; // コモン仕様はサージ必須（ランプ選択は保持）
+      spec.lamp = deriveLampCode(spec.lampLamp, true, 'N');
     }
     if (siR === 'P' && spec.lampCommon !== 'NM') {
-      spec.lampCommon = 'NM'; spec.lampLamp = false;
-      spec.lamp = deriveLampCode(false, spec.lampSurge, 'NM');
+      spec.lampCommon = 'NM'; spec.lampSurge = true;
+      spec.lamp = deriveLampCode(spec.lampLamp, true, 'NM');
     }
   }
 }
