@@ -847,7 +847,7 @@ const S = {
   valveSpecs: [],  // per-valve spec objects
   subScrew: '',     // '' = Rc / 'F' = G / 'N' = NPT / 'T' = NPTF
   eportPilot: 'int', // 'int'|'sil'|'ext' — EX600/EX250/EX180 専用
-  eportAssy:  '',    // ''|'S'|'R' — フラット他: 給排気ブロックAss'y（無記号=内部/S=サイレンサ/R=外部）
+  eportAssy:  '',    // ''|'S'|'R' — フラット他: 給排気ブロックAss\'y（無記号=内部/S=サイレンサ/R=外部）
   metalPePort: '',   // '' = ミリ(無記号) / 'N' = インチ — 金属ベース専用
   connUpperPePort: null, // '' = ミリ(無記号) / 'N' = インチ — コネクタベース+上配管専用
   // A,Bポート管接続口径
@@ -869,7 +869,7 @@ const S = {
   // manifestOptsはマニホールド付属品（silencer/plug/nameplate）のみ。
   // 位置依存部品はバルブ側（valveSpecs[].manifoldOpt）で連を指定して選択する。
   manifestOpts: {},   // { optKey: count }
-  silencerSide: null, // 'U'|'D'|'B' — サイレンサ装着側（P,E取出位置と整合させる）
+  silencerSide: null, connCableLen: '030', connCableInch: false, // 'U'|'D'|'B' — サイレンサ装着側（P,E取出位置と整合させる）
   plugTarget: null,   // 'ab'|'pe' — プラグ対象ポート（口径→品番自動選定）
 };
 
@@ -1754,7 +1754,7 @@ function setWiring(id) {
   S.ex510S = null;
   S.metalFlatS = null;
   S.eportPilot = 'int'; // 配線変更時はintにリセット
-  S.eportAssy  = '';    // Ass'yもリセット
+  S.eportAssy  = '';    // Ass\'yもリセット
   // Update wiring cards
   document.querySelectorAll('.wc').forEach(el => {
     el.classList.toggle('wc-active', el.dataset.wid === id);
@@ -4271,8 +4271,8 @@ function renderVeOptBody() {
   var slotOpts = [
     {k:'blanking',     l:'ブランキングプレート',       sub:'空きスロット封止・配線なし'},
     {k:'out_blanking', l:'出力付きブランキングプレート', sub:'SY3000専用 / バルブ信号取出し', sy3only:true},
-    {k:'sup_block',    l:"単独SUP.ブロックAss'y",      sub:'SUP.ポート個別遮断'},
-    {k:'exh_block',    l:"単独EXH.ブロックAss'y",      sub:'EXH.ポート個別遮断'},
+    {k:'sup_block',    l:"単独SUP.ブロックAss\'y",      sub:'SUP.ポート個別遮断'},
+    {k:'exh_block',    l:"単独EXH.ブロックAss\'y",      sub:'EXH.ポート個別遮断'},
   ];
   html += '<div style="display:flex;flex-direction:column;gap:3px;margin-bottom:6px;">';
   slotOpts.forEach(function(o) {
@@ -5583,7 +5583,29 @@ function getOptionCompatKey() {
 // ─── マニホールドレベルで数量選択できるオプション（位置不要 or 側選択で足りるもの）───
 // それ以外の位置依存部品（スロット占有・スペーサ・減圧弁・ブロッキングディスク）は
 // バルブ側（連クリック→オプションタブ）に一本化し、装着位置を必ず持たせる。
-var MANIFOLD_LEVEL_OPTS = ['silencer', 'plug', 'nameplate'];
+var MANIFOLD_LEVEL_OPTS = ['silencer', 'plug', 'nameplate', 'conn_cable'];
+
+// コネクタケーブルAss'y品番（カタログp.446/448: Dサブ F=AXT100-DS25-□(N)/FW=SY30M-DS25-□(N)、
+// フラット P/PG/PH=AXT100-FC26/20/10-1･2･3）
+function getConnCablePN() {
+  var len = S.connCableLen || '030';
+  if (S.wiring === 'dsub' && (S.connType === 'F' || S.connType === 'FW')) {
+    return (S.connType === 'FW' ? 'SY30M' : 'AXT100') + '-DS25-' + len + (S.connCableInch ? 'N' : '');
+  }
+  if (S.wiring === 'flat' && S.connType) {
+    var poles = { P: '26', PG: '20', PH: '10' }[S.connType];
+    var lenNum = { '015': '1', '030': '2', '050': '3' }[len] || '2';
+    if (poles) return 'AXT100-FC' + poles + '-' + lenNum;
+  }
+  return '—';
+}
+function getConnCableLabel() {
+  var lenLbl = { '015': '1.5m', '030': '3m', '050': '5m' }[S.connCableLen || '030'];
+  if (S.wiring === 'dsub') return 'DサブコネクタケーブルAss\'y（' + (S.connType === 'FW' ? 'IP67' : 'IP40') + '・' + lenLbl + (S.connCableInch ? '・インチ' : '') + '）';
+  return 'フラットケーブルコネクタAss\'y（' + lenLbl + '）';
+}
+function setConnCableLen(v) { S.connCableLen = v; renderManifoldOptions(); updatePN(); }
+function setConnCableInch(v) { S.connCableInch = (v === true || v === 'true'); renderManifoldOptions(); updatePN(); }
 
 // サイレンサ（ワンタッチ継手接続タイプ・3/5(E)ポート用）品番 — カタログp.625
 function getSilencerPN() {
@@ -5719,6 +5741,26 @@ function renderManifoldOptions() {
       + (plugCnt > 0
         ? '<div style="font-size:8px;color:#64748b;margin-top:4px;">対象ポート（口径から品番を自動選定）</div>'
           + chipRow([{v:'ab',l:'A,Bポート（' + (S.abCode||'口径未選択') + '）'},{v:'pe',l:'P,Eポート'}], S.plugTarget, 'setPlugTarget')
+        : '')
+      + '</div>';
+  }
+
+  // ── コネクタケーブルAss'y（Dサブ/フラット時のみ）──
+  if (S.wiring === 'dsub' || S.wiring === 'flat') {
+    var ccCnt = S.manifestOpts['conn_cable'] || 0;
+    html += '<div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:#fff;margin-bottom:5px;">'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;">'
+      + '<div style="flex:1;">'
+      + '<div style="font-size:11px;font-weight:700;color:var(--text);">コネクタケーブルAss\'y</div>'
+      + '<div style="font-size:8px;color:#94a3b8;">' + (S.wiring === 'dsub' ? 'Dサブ25極用' + (S.connType === 'FW' ? '（IP67指定品）' : '（IP40）') : 'フラットケーブル用') + ' — 品番 <span style="font-family:var(--mono);color:#7c3aed;font-weight:700;">' + getConnCablePN() + '</span></div>'
+      + '</div>' + stepper('conn_cable', ccCnt) + '</div>'
+      + (ccCnt > 0
+        ? '<div style="font-size:8px;color:#64748b;margin-top:4px;">ケーブル長さ</div>'
+          + chipRow([{v:'015',l:'1.5m'},{v:'030',l:'3m'},{v:'050',l:'5m'}], S.connCableLen || '030', 'setConnCableLen')
+          + (S.wiring === 'dsub'
+            ? '<div style="font-size:8px;color:#64748b;margin-top:4px;">サイズ表記</div>'
+              + chipRow([{v:false,l:'ミリ（無記号）'},{v:true,l:'インチ（N）'}], !!S.connCableInch, 'setConnCableInch')
+            : '')
         : '')
       + '</div>';
   }
@@ -6196,13 +6238,19 @@ function parseManifoldPN(raw) {
   }
   function applyMount(mc) {
     if (mc === 'AA' || mc === 'BA') { setMountMethod('direct'); if (typeof setMountOpt === 'function') setMountOpt(true, mc === 'AA'); return; }
-    if (mc && mc.charAt(0) === 'D') { setMountMethod('din'); setMountDinLen(mc === 'D' ? '' : mc.slice(1)); return; }
+    var dm = mc ? mc.match(/^([ABD])(\d*)$/) : null;
+    if (dm) {
+      setMountMethod('din'); setMountDinLen(dm[2] || '');
+      // A□=DINレール+銘板+連数印字 / B□=DINレール+銘板のみ
+      if (dm[1] !== 'D' && typeof setMountOpt === 'function') setMountOpt(true, dm[1] === 'A');
+      return;
+    }
     setMountMethod('direct');
   }
 
   if (pipe === '上配管') {
     // -{count}{eport}{N?}{mount}（コネクタベースのみP,E口径N）
-    var um = rest.match(/^([UDB][SR]?|[CEFGHJ])(N?)(AA|BA|D\d*)?$/);
+    var um = rest.match(/^([UDB][SR]?|[CEFGHJ])(N?)(AA|BA|[ABD]\d*)?$/);
     if (!um) return { ok: false, error: '連数以降を解釈できません: ' + rest };
     var epErr = applyEport(um[1]);
     if (epErr) return { ok: false, error: epErr };
@@ -6214,7 +6262,7 @@ function parseManifoldPN(raw) {
     if (!sm) return { ok: false, error: '連数以降を解釈できません: ' + rest };
     var epErr2 = applyEport(sm[1] || 'U');
     if (epErr2) return { ok: false, error: epErr2 };
-    var pm = sm[2].match(/^(C\d+|CM|LM|M5|0[123])?([FN]?)(AA|BA|D\d*)?$/);
+    var pm = sm[2].match(/^(C\d+|CM|LM|LN?\d+|BN?\d+|N\d+|M5|0[123])?([FN]?)(AA|BA|[ABD]\d*)?$/);
     if (!pm || (sm[2] && !pm[0])) return { ok: false, error: '口径/取付コードを解釈できません: ' + sm[2] };
     if (pm[1]) {
       if (base === 'mixed' && /^C\d{2,3}$/.test(pm[1]) && pm[1] !== 'CM') {
@@ -6224,6 +6272,12 @@ function parseManifoldPN(raw) {
         if (digits.length === 3) { big = digits.slice(0, 2); small = digits.slice(2); }
         else { big = digits.charAt(0); small = digits.charAt(1); }
         S.mixBig = big; S.mixSmall = small; S.abCode = pm[1];
+      } else if (/^(L|B)N?\d/.test(pm[1])) {
+        // エルボ口径（L=上向き/B=下向き）
+        if (typeof setAbPipeType === 'function') setAbPipeType('push');
+        S.abDir = pm[1].charAt(0) === 'L' ? 'EL_UP' : 'EL_DN';
+        S.abCode = pm[1];
+        notes.push('エルボ管継手口径(' + pm[1] + ')を反映しました');
       } else {
         if (typeof setAbPipeType === 'function') setAbPipeType('st');
         setAbCode(pm[1]);
@@ -6598,6 +6652,10 @@ function updateSolMeter() {
 // 選択を即時補正する（個別パネルを開くまで不正品番がPN/Excelに出るのを防ぐ）
 function sanitizeAllValves() {
   if (!S.series) return;
+  // コネクタケーブルAss'yはDサブ/フラット専用（配線切替時に解除）
+  if (S.manifestOpts && S.manifestOpts['conn_cable'] && S.wiring !== 'dsub' && S.wiring !== 'flat') {
+    delete S.manifestOpts['conn_cable'];
+  }
   // 連数: 配線方式の上限超過をクランプ（配線切替後に旧連数が残るのを防ぐ）
   if (S.wiring) {
     var stLimS = getWiringLimits().st;
@@ -7552,12 +7610,12 @@ function exportExcel() {
     } else if (opt.slot === 'sup_block') {
       // スロット：SUPブロック
       var sbpn = 'SY'+series+'0M-78-'+(opt.slotElbow||'1')+'A-'+(opt.slotSize||'□');
-      bom.push(['オプション', slot+'連目', sbpn, "単独SUP.ブロックAss'y"]);
+      bom.push(['オプション', slot+'連目', sbpn, "単独SUP.ブロックAss\'y"]);
 
     } else if (opt.slot === 'exh_block') {
       // スロット：EXHブロック
       var ebpn = 'SY'+series+'0M-79-'+(opt.slotElbow||'1')+'A-'+(opt.slotSize||'□');
-      bom.push(['オプション', slot+'連目', ebpn, "単独EXH.ブロックAss'y"]);
+      bom.push(['オプション', slot+'連目', ebpn, "単独EXH.ブロックAss\'y"]);
 
     } else {
       // 通常バルブ
@@ -7587,7 +7645,7 @@ function exportExcel() {
         bom.push(['オプション', slot+'連目付属', buildReducValvePN(series, opt.reducValve), 'スペーサ形減圧弁']);
       }
       if (opt.backpressAssy) {
-        bom.push(['オプション', slot+'連目付属', getBackpressAssyPN(series), "背圧防止弁Ass'y（MH装着）"]);
+        bom.push(['オプション', slot+'連目付属', getBackpressAssyPN(series), "背圧防止弁Ass\'y（MH装着）"]);
       }
       if (opt.blockingDiscSup) {
         bom.push(['オプション', slot+'連目付属', getBlockingDiscPN(series,'sup'), 'SUP.ブロッキングディスク']);
@@ -7602,6 +7660,7 @@ function exportExcel() {
   function manifoldAccPN(k) {
     if (k === 'silencer') return getSilencerPN();
     if (k === 'plug') return getPlugPN(S.plugTarget || 'ab');
+    if (k === 'conn_cable') return getConnCablePN();
     return getOptPN(k, series, {});
   }
   function manifoldAccLabel(k) {
@@ -7609,6 +7668,7 @@ function exportExcel() {
     var base = def ? def.label : k;
     if (k === 'silencer') return base + (S.silencerSide ? '（' + ({U:'U側',D:'D側',B:'両側'}[S.silencerSide]) + ' Eポート）' : '（装着側未選択）');
     if (k === 'plug') return base + (S.plugTarget ? '（' + (S.plugTarget==='ab'?'A,B':'P,E') + 'ポート用）' : '（対象未選択）');
+    if (k === 'conn_cable') return getConnCableLabel();
     return base;
   }
   var mopts = S.manifestOpts || {};
@@ -7689,7 +7749,7 @@ function exportExcel() {
       var posLabel = k==='silencer' ? (S.silencerSide ? ({U:'U側',D:'D側',B:'両側'}[S.silencerSide]) + ' 3/5(E)ポート' : '⚠側未選択')
                    : k==='plug' ? (S.plugTarget ? (S.plugTarget==='ab'?'A,Bポート':'P,Eポート') : '⚠対象未選択')
                    : '—';
-      grid.push([(OPTION_DEFS[k]||{}).label || k, manifoldAccPN(k), posLabel, S.manifestOpts[k]]);
+      grid.push([k === 'conn_cable' ? 'コネクタケーブルAss\'y' : ((OPTION_DEFS[k]||{}).label || k), manifoldAccPN(k), posLabel, S.manifestOpts[k]]);
     });
   }
   grid.push(['']);
@@ -7829,7 +7889,7 @@ function exportEditorJSON() {
 function resetAll() {
   _valveEverClicked = false;
   _touchedValves = new Set();
-  Object.assign(S, {series:null,base:null,pipe:null,wiring:null,connType:null,connDir:null,leadNum:null,leadLen:null,wirelessType:null,wirelessNum:null,wirelessPnp:false,ex500Si:null,ex510Si:null,ex510N:null,ex510S:null,metalFlatS:null,ex600Si:null,ex600Io:null,ex600IoPolar:null,ex600IoCount:null,ex600IoUnits:[],ex245Si:null,ex245Io:null,ex245IoMod:null,ex250Si:null,ex250Io:null,ex250Spec:null,ex260Si:null,ex260Pts:null,ex260Polar:null,ex260Conn:null,ex126Si:null,ex120Si:null,ex120Proto:null,ex180Si:null,ex180Pts:null,ex180Conn:null,ex180PolarSel:null,subScrew:'',eportPilot:'int',eportAssy:'',metalPePort:'',connUpperPePort:null,mixBig:'',mixSmall:'',abPipeType:null,abDir:null,abCode:null,abUnit:'mm',peFittingUnit:'mm',peFittingDir:null,mountMethod:null,mountPlate:false,mountPrint:false,mountDinLen:null,manifestOpts:{},silencerSide:null,plugTarget:null,backpressAssyAll:false,valveCount:2,valveTypes:[],valveSpecs:[],bulkSpec:null});
+  Object.assign(S, {series:null,base:null,pipe:null,wiring:null,connType:null,connDir:null,leadNum:null,leadLen:null,wirelessType:null,wirelessNum:null,wirelessPnp:false,ex500Si:null,ex510Si:null,ex510N:null,ex510S:null,metalFlatS:null,ex600Si:null,ex600Io:null,ex600IoPolar:null,ex600IoCount:null,ex600IoUnits:[],ex245Si:null,ex245Io:null,ex245IoMod:null,ex250Si:null,ex250Io:null,ex250Spec:null,ex260Si:null,ex260Pts:null,ex260Polar:null,ex260Conn:null,ex126Si:null,ex120Si:null,ex120Proto:null,ex180Si:null,ex180Pts:null,ex180Conn:null,ex180PolarSel:null,subScrew:'',eportPilot:'int',eportAssy:'',metalPePort:'',connUpperPePort:null,mixBig:'',mixSmall:'',abPipeType:null,abDir:null,abCode:null,abUnit:'mm',peFittingUnit:'mm',peFittingDir:null,mountMethod:null,mountPlate:false,mountPrint:false,mountDinLen:null,manifestOpts:{},silencerSide:null,connCableLen:'030',connCableInch:false,plugTarget:null,backpressAssyAll:false,valveCount:2,valveTypes:[],valveSpecs:[],bulkSpec:null});
   document.querySelectorAll('.chip,.wc,.sub-chip').forEach(e=>e.classList.remove('active','wc-active'));
   [1,2,3,4,5,6,7,8,9].forEach(n=>{markStep(n,''); var sv=document.getElementById('sv'+n); if(sv) sv.textContent='—';});
   document.getElementById('step5-wrap').style.display='none';
@@ -8205,8 +8265,9 @@ function buildOrderItems() {
   MANIFOLD_LEVEL_OPTS.forEach(function(k) {
     var cnt = (S.manifestOpts || {})[k];
     if (!cnt || cnt <= 0) return;
-    var pnAcc = k === 'silencer' ? getSilencerPN() : k === 'plug' ? getPlugPN(S.plugTarget || 'ab') : '—';
-    for (var c = 0; c < cnt; c++) add(pnAcc, (OPTION_DEFS[k]||{}).label || k);
+    var pnAcc = k === 'silencer' ? getSilencerPN() : k === 'plug' ? getPlugPN(S.plugTarget || 'ab') : k === 'conn_cable' ? getConnCablePN() : '—';
+    var lblAcc = k === 'conn_cable' ? getConnCableLabel() : ((OPTION_DEFS[k]||{}).label || k);
+    for (var c = 0; c < cnt; c++) add(pnAcc, lblAcc);
   });
   return Object.keys(agg).sort(function(a, b){ return agg[a].order - agg[b].order; })
     .map(function(pn){ return { pn: pn, qty: agg[pn].count, label: agg[pn].label }; });
