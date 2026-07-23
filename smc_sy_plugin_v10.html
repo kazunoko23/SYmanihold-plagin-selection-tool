@@ -361,13 +361,25 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
     <input id="rev-manifold-input" type="text" placeholder="例: SS5Y3-10F2-05U-C6"
       style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:13px;font-weight:700;margin-bottom:10px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
-      <div style="font-size:10px;font-weight:700;color:#0d3458;">バルブ品番リスト（1行=1連・D側が1行目・CSV可）</div>
-      <label style="font-size:9px;color:#2c5f8a;cursor:pointer;font-weight:700;">📄 CSVファイル読込
-        <input type="file" accept=".csv,.txt" style="display:none;" onchange="loadReverseCsvFile(this.files[0]);this.value='';">
-      </label>
+      <div style="font-size:10px;font-weight:700;color:#0d3458;">バルブ品番（1行=1連・1連目=D側）</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:9px;color:#64748b;">連数:</span>
+        <button onclick="revSetRows(-1)" style="border:1px solid var(--border);background:#fff;border-radius:4px;width:20px;height:20px;cursor:pointer;font-weight:800;">−</button>
+        <span id="rev-row-count" style="font-size:11px;font-weight:800;color:var(--blue);min-width:16px;text-align:center;">5</span>
+        <button onclick="revSetRows(1)" style="border:1px solid var(--border);background:#fff;border-radius:4px;width:20px;height:20px;cursor:pointer;font-weight:800;">＋</button>
+        <label style="font-size:9px;color:#2c5f8a;cursor:pointer;font-weight:700;margin-left:6px;">📄 CSV読込
+          <input type="file" accept=".csv,.txt" style="display:none;" onchange="loadReverseCsvFile(this.files[0]);this.value='';">
+        </label>
+      </div>
     </div>
-    <textarea id="rev-valve-input" rows="8" placeholder="例:&#10;SY3100-5U1&#10;SY3200R-5ZD1&#10;SY5300-5U1E&#10;ブランク&#10;SY30M-26-1A&#10;（「連番,品番」形式のCSVも可）"
-      style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:12px;line-height:1.6;margin-bottom:10px;"></textarea>
+    <div style="border:1.5px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:4px;">
+      <div style="display:grid;grid-template-columns:64px 1fr;background:#f1f5f9;border-bottom:1px solid var(--border);">
+        <div style="padding:4px 8px;font-size:9px;font-weight:800;color:#475569;text-align:center;border-right:1px solid var(--border);">連</div>
+        <div style="padding:4px 8px;font-size:9px;font-weight:800;color:#475569;">バルブ品番（空欄=無記号バルブ ※最終連は「ブランク」と入力）</div>
+      </div>
+      <div id="rev-valve-grid" style="max-height:280px;overflow-y:auto;"></div>
+    </div>
+    <div style="font-size:8px;color:#94a3b8;margin-bottom:10px;">💡 Excelから複数行を選択してコピーし、貼り付けたい連のセルに Ctrl＋V すると下方向に一括入力されます（先頭の連番列は自動で無視）</div>
     <button onclick="runReversePN()" style="width:100%;padding:9px;background:#7c4a0d;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:800;cursor:pointer;">↩ 品番から構成を復元</button>
     <div id="rev-status" style="display:none;margin-top:8px;font-size:10px;font-weight:600;border-radius:6px;padding:8px 10px;line-height:1.8;"></div>
     <div style="margin-top:8px;font-size:9px;color:#94a3b8;line-height:1.7;">
@@ -6314,9 +6326,69 @@ function applyValveCsv(text) {
 }
 
 // ─── 逆引きモーダル ───
+// バルブ入力グリッド（Excel風セル・左列=連番固定・複数行貼り付け対応）
+var _revRows = 5;
+function _revGridValues() {
+  var vals = [];
+  for (var i = 0; i < _revRows; i++) {
+    var el = document.getElementById('rev-cell-' + i);
+    vals.push(el ? el.value : '');
+  }
+  return vals;
+}
+function renderRevGrid(preserve) {
+  var grid = document.getElementById('rev-valve-grid');
+  if (!grid) return;
+  var vals = preserve ? _revGridValues() : [];
+  var html = '';
+  for (var i = 0; i < _revRows; i++) {
+    html += '<div style="display:grid;grid-template-columns:64px 1fr;border-bottom:1px solid #eef2f7;">'
+      + '<div style="padding:5px 8px;font-size:10px;font-weight:800;color:' + (i === 0 ? 'var(--blue)' : '#64748b') + ';text-align:center;background:#f8fafc;border-right:1px solid var(--border);line-height:1.4;">'
+      + (i + 1) + (i === 0 ? '<span style="font-size:7px;display:block;color:var(--blue);">D側</span>' : '')
+      + '</div>'
+      + '<input id="rev-cell-' + i + '" type="text" value="' + String(vals[i] || '').replace(/"/g, '&quot;') + '"'
+      + ' onpaste="revCellPaste(event,' + i + ')"'
+      + ' placeholder="' + (i === 0 ? '例: SY3100-5U1' : '') + '"'
+      + ' style="border:none;outline:none;padding:5px 10px;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text);background:#fff;">'
+      + '</div>';
+  }
+  grid.innerHTML = html;
+  var rc = document.getElementById('rev-row-count');
+  if (rc) rc.textContent = _revRows;
+}
+function revSetRows(d) {
+  _revRows = Math.max(2, Math.min(24, _revRows + d));
+  renderRevGrid(true);
+}
+function _revSetRowCount(n, preserve) {
+  _revRows = Math.max(2, Math.min(24, n));
+  renderRevGrid(preserve !== false);
+}
+// CSV/Excel行から品番セルを取り出す（先頭の連番列などの数字のみセルは無視）
+function _revCleanLine(line) {
+  var cells = String(line || '').split(/[,\t;]/).map(function(c){ return c.trim(); });
+  var pn = cells.find(function(c){ return c && !/^\d+$/.test(c); });
+  return pn || '';
+}
+function revCellPaste(e, idx) {
+  var txt = '';
+  try { txt = (e.clipboardData || window.clipboardData).getData('text'); } catch (err) { return; }
+  var isMulti = /[\r\n]/.test(txt.trim()) || /[\t]/.test(txt);
+  if (!isMulti) return; // 単一値は通常の貼り付けに任せる
+  e.preventDefault();
+  var lines = txt.split(/\r?\n/);
+  while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+  if (idx + lines.length > _revRows) _revSetRowCount(idx + lines.length, true);
+  lines.forEach(function(l, k) {
+    var el = document.getElementById('rev-cell-' + (idx + k));
+    if (el) el.value = _revCleanLine(l);
+  });
+}
 function showReversePNModal() {
   var mdl = document.getElementById('reverse-pn-modal');
   if (mdl) mdl.style.display = 'flex';
+  if (S.series && S.valveCount) _revSetRowCount(S.valveCount, true);
+  else renderRevGrid(true);
 }
 function closeReversePNModal() {
   var mdl = document.getElementById('reverse-pn-modal');
@@ -6324,7 +6396,9 @@ function closeReversePNModal() {
 }
 function runReversePN() {
   var mpn = document.getElementById('rev-manifold-input').value;
-  var vcsv = document.getElementById('rev-valve-input').value;
+  var gvals = _revGridValues();
+  while (gvals.length && !gvals[gvals.length - 1].trim()) gvals.pop();
+  var vcsv = gvals.join('\n');
   var out = [];
   var okAll = true;
   if (mpn.trim()) {
@@ -6333,6 +6407,8 @@ function runReversePN() {
     else {
       out.push('✓ マニホールド品番を反映しました');
       (mres.notes || []).forEach(function(nt){ out.push('ℹ ' + nt); });
+      // 品番の連数にグリッド行数を合わせる（既入力は保持）
+      _revSetRowCount(S.valveCount, true);
     }
   }
   if (vcsv.trim() && okAll) {
@@ -6356,7 +6432,13 @@ function loadReverseCsvFile(file) {
   if (!file) return;
   var reader = new FileReader();
   reader.onload = function() {
-    document.getElementById('rev-valve-input').value = String(reader.result || '');
+    var lines = String(reader.result || '').split(/\r?\n/);
+    while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+    if (lines.length) _revSetRowCount(lines.length, false);
+    lines.forEach(function(l, k) {
+      var el = document.getElementById('rev-cell-' + k);
+      if (el) el.value = _revCleanLine(l);
+    });
   };
   reader.readAsText(file);
 }
