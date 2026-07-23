@@ -442,17 +442,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
   <div class="lp-scroll">
 
     <!-- チュートリアル導線: 品番が決まっている場合 -->
-    <div onclick="showReversePNModal()"
-      style="margin:8px 10px 2px;border:1.5px solid #d9a44a;border-radius:8px;background:linear-gradient(135deg,#fdf6e8,#fbeed3);padding:8px 12px;cursor:pointer;transition:all .15s;"
-      onmouseover="this.style.boxShadow='0 2px 8px rgba(217,164,74,.35)'" onmouseout="this.style.boxShadow='none'">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <div>
-          <div style="font-size:10px;font-weight:800;color:#7c4a0d;">📌 すでに品番が決まっている場合はこちら</div>
-          <div style="font-size:8.5px;color:#9a6b1f;margin-top:2px;line-height:1.5;">マニホールド品番・バルブ品番を貼り付けて選定内容を復元（逆引き）</div>
-        </div>
-        <div style="font-size:14px;color:#7c4a0d;font-weight:800;">→</div>
-      </div>
-    </div>
+    <button onclick="showReversePNModal()"
+      style="display:block;width:calc(100% - 20px);margin:8px 10px 2px;border:2px solid #b8842f;border-radius:8px;background:linear-gradient(135deg,#e9a83a,#d18a1f);padding:9px 12px;cursor:pointer;text-align:center;box-shadow:0 2px 5px rgba(150,100,20,.3);transition:all .15s;"
+      onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 10px rgba(150,100,20,.45)'"
+      onmouseout="this.style.transform='';this.style.boxShadow='0 2px 5px rgba(150,100,20,.3)'">
+      <div style="font-size:11px;font-weight:800;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.2);">📌 すでに品番が決まっている場合はこちら</div>
+      <div style="font-size:8.5px;color:#fdf3dd;margin-top:2px;line-height:1.5;">クリックすると品番の貼り付け画面が開きます（選定内容を復元）</div>
+    </button>
     <div style="margin:2px 10px 6px;font-size:8.5px;color:#94a3b8;text-align:center;">— 新規に選定する場合は下のステップ1から —</div>
 
     <!-- STEP 1: バルブシリーズ -->
