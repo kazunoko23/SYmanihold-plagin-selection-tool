@@ -1826,7 +1826,7 @@ function renderConnDetail() {
     const isMetal = S.base === 'metal';
     const maxMapDouble = { P:12, PG:9,  PH:4  }; // 金属ベース+ダブル配線時
     const maxMapSingle = { P:12, PG:12, PH:8  }; // 金属ベース+シングル配線(S)時
-    const maxMapConn   = { P:24, PG:10, PH:8  }; // コネクタベース時
+    const maxMapConn   = { P:24, PG:18, PH:8  }; // コネクタベース時（getWiringLimitsの連数表と同値）
     function getFlatMax() {
       if (!S.connType) return 24;
       if (!isMetal) return maxMapConn[S.connType] || 24;
@@ -2743,9 +2743,8 @@ function renderConnDetail() {
 
 function setConnType(v) {
   S.connType = v;
-  // Update valve max based on flat type
-  const maxMap = { P:24, PG:10, PH:8, F:24, FW:24 };
-  const max = maxMap[v] || 24;
+  // 連数上限は getWiringLimits()（カタログ連数表・金属/コネクタ/配線仕様も考慮）に一本化
+  const max = getWiringLimits().st;
   if (S.valveCount > max) {
     S.valveCount = max;
     document.getElementById('valve-val').textContent = max;
@@ -3118,9 +3117,11 @@ function changeValve(d) {
   // 連数上限は getWiringLimits()（カタログ連数表準拠）に一本化
   var max = getWiringLimits().st;
   S.valveCount = Math.max(2, Math.min(max, S.valveCount + d));
-  // valveTypesを連数に合わせて同期
+  // valveTypes/valveSpecsを連数に合わせて同期
+  // （specsを残すと減連→再増連で旧仕様が品番にだけ復活しSVG表示と食い違う）
   while (S.valveTypes.length < S.valveCount) S.valveTypes.push('single');
   S.valveTypes = S.valveTypes.slice(0, S.valveCount);
+  if (S.valveSpecs && S.valveSpecs.length > S.valveCount) S.valveSpecs = S.valveSpecs.slice(0, S.valveCount);
   document.getElementById('valve-val').textContent = S.valveCount;
   document.getElementById('sv6').textContent = S.valveCount + '連';
   markStep(6,'done');
@@ -4033,6 +4034,7 @@ function veSet(idx, field, value) {
   renderVeIndBody(idx);
   // 個別仕様マーク（ランプLED/節電T/ねじH等）をSVGに即時反映
   renderSVG(true);
+  scheduleAutosave();
 }
 
 function veBulkSet(field, value) {
@@ -4069,6 +4071,7 @@ function veBulkApply() {
   // 一括適用結果をバルブ品番バー・SVG個別仕様マークに即時反映
   updateValvePNBar();
   renderSVG(true);
+  scheduleAutosave();
 }
 
 function updateVePn(idx) {
@@ -5069,6 +5072,16 @@ function buildPN() {
     if (isMetalBase) segs.push({ key:'ねじの種類', val: S.subScrew==='F'?'F(G)':S.subScrew==='N'?'N(NPT)':'無記号(Rc)' });
   }
   segs.push({ key:'取付方法', val: mountCode === null ? '—' : (mount === '' ? '無記号(直接取付)' : mount) });
+
+  // ソレノイド点数の上限チェック（超過時は品番確定させない）
+  if (S.wiring) {
+    var solLimB = getWiringLimits();
+    var solNowB = getSolenoidUsage();
+    if (solNowB > solLimB.sol) {
+      complete = false;
+      notes.push('⚠ ソレノイド数 ' + solNowB + '点が配線方式の上限 ' + solLimB.sol + '点を超えています。バルブ構成（ダブル/3位置等）を見直してください。');
+    }
+  }
 
   return { full, complete, notes, segs };
 }
@@ -6124,6 +6137,17 @@ function updateSolMeter() {
 // 選択を即時補正する（個別パネルを開くまで不正品番がPN/Excelに出るのを防ぐ）
 function sanitizeAllValves() {
   if (!S.series) return;
+  // 連数: 配線方式の上限超過をクランプ（配線切替後に旧連数が残るのを防ぐ）
+  if (S.wiring) {
+    var stLimS = getWiringLimits().st;
+    if (S.valveCount > stLimS) {
+      S.valveCount = stLimS;
+      S.valveTypes = S.valveTypes.slice(0, stLimS);
+      if (S.valveSpecs && S.valveSpecs.length > stLimS) S.valveSpecs = S.valveSpecs.slice(0, stLimS);
+      var vvElS = document.getElementById('valve-val'); if (vvElS) vvElS.textContent = S.valveCount;
+      var sv6ElS = document.getElementById('sv6'); if (sv6ElS) sv6ElS.textContent = S.valveCount + '連';
+    }
+  }
   // A,Bポート口径: 現在のベース×配管×シリーズの対応口径外なら再選択に戻す
   // （混合取付は2桁口径C86等のため対象外）
   if (S.base !== 'mixed') {
@@ -6976,8 +7000,9 @@ function webBtn(pn) {
 function copyPN() {
   const res = buildPN();
   if (!res) return;
+  const btn = event && event.target; // Promise解決後はevent.targetが消えるため同期で捕捉
   navigator.clipboard.writeText(res.full).then(()=>{
-    const btn = event.target;
+    if (!btn) return;
     btn.textContent='✓ 済';
     setTimeout(()=>btn.textContent='📋 コピー',1500);
   });
@@ -7005,8 +7030,15 @@ function exportExcel() {
     ['バルブ連数', S.valveCount+'連',''],
     ['P,Eポート', (getEportCode()||'U'),''],
     ['ねじの種類（金属ベース）', S.base==='metal' ? (S.subScrew||'無記号(Rc)') : '—',''],
-    ['取付方法', (document.getElementById('sel-mount')?document.getElementById('sel-mount').value:'')||'直接取付',''],
-    ['給排気ブロックAss\'y', (document.getElementById('sel-exhaust')?document.getElementById('sel-exhaust').value:'')||'標準',''],
+    ['取付方法', (function(){
+      var mc = getMountCode();
+      if (mc === null) return '—（未選択）';
+      if (S.mountMethod === 'direct') {
+        return '直接取付' + (mc === 'AA' ? '（AA・銘板+連数印字）' : mc === 'BA' ? '（BA・銘板のみ）' : '（無記号）');
+      }
+      return 'DINレール取付（' + mc + (S.mountDinLen === '' ? '・標準長' : S.mountDinLen === '0' ? '・レールなし' : '・' + S.mountDinLen + '連用') + '）';
+    })(),''],
+    ['給排気ブロックAss\'y', ({int:'無記号（内部パイロット）', sil:'S（内部パイロット・サイレンサ内蔵）', ext:'R（外部パイロット）'}[S.eportPilot]) || '無記号（内部パイロット）',''],
     [''],['品番分解'],
     ...res.segs.map(s=>[s.key, s.val,'']),
     [''],['注記'],
@@ -7274,15 +7306,20 @@ function exportEditorJSON() {
     '3cs':  { keywords:['マニホールド','5ポート','3位置','クローズドセンタ','内部パイロット'],  double:true  },
     '3es':  { keywords:['マニホールド','5ポート','3位置','エキゾーストセンタ','内部パイロット'],double:true  },
     '3ps':  { keywords:['マニホールド','5ポート','3位置','プレッシャセンタ','内部パイロット'], double:true  },
-    '3port':{ keywords:['マニホールド','3ポート','2位置','シングルソレノイド','内部パイロット'],double:false },
+    // 4位置デュアル3ポート（A=N.C./N.C.・B=N.O./N.O.・C=N.C./N.O.）: ソレノイド2点
+    '4pos': { keywords:['マニホールド','3ポート','4位置','デュアル','N.C./N.C.'],              double:true  },
+    'dual': { keywords:['マニホールド','3ポート','4位置','デュアル','N.O./N.O.'],              double:true  },
+    '3port':{ keywords:['マニホールド','3ポート','4位置','デュアル','N.C./N.O.'],              double:true  },
     blank:  { keywords:['マニホールド','5ポート','ブランキングプレート'],                       double:false },
   };
 
   const stations = [];
   for (let i = 0; i < S.valveCount; i++) {
-    const vt   = S.valveTypes[i] || 'single';
     const spec = getValveSpec(i);
-    const pn   = getValvePN(i);
+    // ブランキングプレート指定連（スロット占有オプション）はブランク扱いで出力
+    const isSlotBlank = !!(spec.manifoldOpt && spec.manifoldOpt.slot === 'blanking');
+    const vt   = isSlotBlank ? 'blank' : (S.valveTypes[i] || 'single');
+    const pn   = isSlotBlank ? getOptPN('blanking', S.series, {}) : getValvePN(i);
     const jis  = TYPE_TO_JIS[vt] || TYPE_TO_JIS.single;
 
     // シリンダ種類（複動/単動）の推定
