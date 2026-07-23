@@ -379,7 +379,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
       </div>
       <div id="rev-valve-grid" style="max-height:280px;overflow-y:auto;"></div>
     </div>
-    <div style="font-size:8px;color:#94a3b8;margin-bottom:10px;">💡 Excelから複数行を選択してコピーし、貼り付けたい連のセルに Ctrl＋V すると下方向に一括入力されます（先頭の連番列は自動で無視）</div>
+    <div style="font-size:8px;color:#94a3b8;margin-bottom:10px;">💡 Excelから複数行をコピーして1連目のセルに Ctrl＋V すると、<b>連数も貼り付けた行数に自動調整</b>されて一括入力されます（先頭の連番列は自動で無視・途中のセルへの貼り付けは下方向に追記）</div>
     <button onclick="runReversePN()" style="width:100%;padding:9px;background:#7c4a0d;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:800;cursor:pointer;">↩ 品番から構成を復元</button>
     <div id="rev-status" style="display:none;margin-top:8px;font-size:10px;font-weight:600;border-radius:6px;padding:8px 10px;line-height:1.8;"></div>
     <div style="margin-top:8px;font-size:9px;color:#94a3b8;line-height:1.7;">
@@ -6378,7 +6378,12 @@ function revCellPaste(e, idx) {
   e.preventDefault();
   var lines = txt.split(/\r?\n/);
   while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
-  if (idx + lines.length > _revRows) _revSetRowCount(idx + lines.length, true);
+  if (idx === 0 && lines.length >= 2) {
+    // 1連目への複数行貼り付け＝リスト全置換 → 連数（行数）を貼り付け行数に自動調整
+    _revSetRowCount(lines.length, false);
+  } else if (idx + lines.length > _revRows) {
+    _revSetRowCount(idx + lines.length, true);
+  }
   lines.forEach(function(l, k) {
     var el = document.getElementById('rev-cell-' + (idx + k));
     if (el) el.value = _revCleanLine(l);
