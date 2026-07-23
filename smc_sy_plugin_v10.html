@@ -346,6 +346,36 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
   </div>
 </div>
 
+<!-- 品番逆引きモーダル -->
+<div id="reverse-pn-modal" style="display:none;position:fixed;inset:0;z-index:900;background:rgba(10,20,35,.55);align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;width:600px;max-width:92vw;max-height:90vh;overflow-y:auto;padding:18px 22px;box-shadow:0 12px 40px rgba(0,0,0,.35);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-size:14px;font-weight:800;color:#0d3458;">🔎 品番から逆引き（構成の復元）</div>
+      <button onclick="closeReversePNModal()" style="border:none;background:#f1f5f9;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;padding:3px 9px;color:#475569;">✕ 閉じる</button>
+    </div>
+    <div style="font-size:10px;color:#475569;line-height:1.7;margin-bottom:10px;">
+      マニホールド品番とバルブ品番のリストを入力すると、選定内容をUIに復元します。<br>
+      ※現在の選定内容は上書きされます。バルブは<b>1行目＝D側1連目</b>として順に反映します。
+    </div>
+    <div style="font-size:10px;font-weight:700;color:#0d3458;margin-bottom:3px;">マニホールド品番</div>
+    <input id="rev-manifold-input" type="text" placeholder="例: SS5Y3-10F2-05U-C6"
+      style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:13px;font-weight:700;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+      <div style="font-size:10px;font-weight:700;color:#0d3458;">バルブ品番リスト（1行=1連・D側が1行目・CSV可）</div>
+      <label style="font-size:9px;color:#2c5f8a;cursor:pointer;font-weight:700;">📄 CSVファイル読込
+        <input type="file" accept=".csv,.txt" style="display:none;" onchange="loadReverseCsvFile(this.files[0]);this.value='';">
+      </label>
+    </div>
+    <textarea id="rev-valve-input" rows="8" placeholder="例:&#10;SY3100-5U1&#10;SY3200R-5ZD1&#10;SY5300-5U1E&#10;ブランク&#10;SY30M-26-1A&#10;（「連番,品番」形式のCSVも可）"
+      style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:12px;line-height:1.6;margin-bottom:10px;"></textarea>
+    <button onclick="runReversePN()" style="width:100%;padding:9px;background:#7c4a0d;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:800;cursor:pointer;">↩ 品番から構成を復元</button>
+    <div id="rev-status" style="display:none;margin-top:8px;font-size:10px;font-weight:600;border-radius:6px;padding:8px 10px;line-height:1.8;"></div>
+    <div style="margin-top:8px;font-size:9px;color:#94a3b8;line-height:1.7;">
+      対応: 全ベース（コネクタ/金属/混合）・全配線方式（EX600のI/Oユニット⑤とEX180詳細はStep5で選択）／通常・真空・残圧排気弁付・圧力センサ付バルブ／ブランクプレート（SY□0M-26-2A）・ブランキング（SY□0M-26-1A）／空欄・「ブランク」＝無記号バルブ
+    </div>
+  </div>
+</div>
+
 <!-- ─── Protocol popup ─── -->
 <div id="proto-popup" class="proto-popup">
   <div class="proto-popup-hdr">
@@ -377,6 +407,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
       title="SMC公式のマニホールド仕様書Excel（SS5Y□-□□.xlsx）に現在の選定内容を自動記入します"
       style="background:#0d7a4f;margin-left:6px;">📝 公式仕様書に記入</button>
     <input type="file" id="official-form-input" accept=".xlsx" style="display:none;" onchange="fillOfficialSpecForm(this.files[0]);this.value='';">
+    <button class="btn-top btn-excel" onclick="showReversePNModal()" style="background:#7c4a0d;margin-left:6px;"
+      title="マニホールド品番とバルブ品番リスト（CSV・D側が1行目）から選定内容を復元します">🔎 品番から逆引き</button>
     <button class="btn-top btn-excel" onclick="exportEditorJSON()" style="background:#2c5f8a;margin-left:6px;">📐 回路図JSON</button>
   </div>
 </div>
@@ -896,6 +928,55 @@ const EX600_IO_CAT_LABEL = {
   din:'デジタル入力', dout:'デジタル出力', dio:'デジタル入出力',
   ain:'アナログ入力', aout:'アナログ出力', aio:'アナログ入出力', iol:'IO-Link'
 };
+
+// EX260 SIユニット一覧（UI表示と品番逆引きで共用）
+var EX260_ALL = [
+  { code:'0',   pts:32, com:'—',   conn:'—',    proto:'SIユニットなし' },
+  // DeviceNet® — 32点/16点、M12
+  { code:'QA',  pts:32, com:'NPN', conn:'M12',  proto:'DeviceNet®' },
+  { code:'QAN', pts:32, com:'PNP', conn:'M12',  proto:'DeviceNet®' },
+  { code:'QB',  pts:16, com:'NPN', conn:'M12',  proto:'DeviceNet®' },
+  { code:'QBN', pts:16, com:'PNP', conn:'M12',  proto:'DeviceNet®' },
+  // PROFIBUS DP — 32/16点 × M12/D-sub
+  { code:'NA',  pts:32, com:'NPN', conn:'M12',  proto:'PROFIBUS DP' },
+  { code:'NAN', pts:32, com:'PNP', conn:'M12',  proto:'PROFIBUS DP' },
+  { code:'NB',  pts:16, com:'NPN', conn:'M12',  proto:'PROFIBUS DP' },
+  { code:'NBN', pts:16, com:'PNP', conn:'M12',  proto:'PROFIBUS DP' },
+  { code:'NC',  pts:32, com:'NPN', conn:'D-sub',proto:'PROFIBUS DP' },
+  { code:'NCN', pts:32, com:'PNP', conn:'D-sub',proto:'PROFIBUS DP' },
+  { code:'ND',  pts:16, com:'NPN', conn:'D-sub',proto:'PROFIBUS DP' },
+  { code:'NDN', pts:16, com:'PNP', conn:'D-sub',proto:'PROFIBUS DP' },
+  // CC-Link
+  { code:'VA',  pts:32, com:'NPN', conn:'M12',  proto:'CC-Link' },
+  { code:'VAN', pts:32, com:'PNP', conn:'M12',  proto:'CC-Link' },
+  { code:'VB',  pts:16, com:'NPN', conn:'M12',  proto:'CC-Link' },
+  { code:'VBN', pts:16, com:'PNP', conn:'M12',  proto:'CC-Link' },
+  // EtherCAT
+  { code:'DA',  pts:32, com:'NPN', conn:'M12',  proto:'EtherCAT' },
+  { code:'DAN', pts:32, com:'PNP', conn:'M12',  proto:'EtherCAT' },
+  { code:'DB',  pts:16, com:'NPN', conn:'M12',  proto:'EtherCAT' },
+  { code:'DBN', pts:16, com:'PNP', conn:'M12',  proto:'EtherCAT' },
+  // PROFINET
+  { code:'FA',  pts:32, com:'NPN', conn:'M12',  proto:'PROFINET' },
+  { code:'FAN', pts:32, com:'PNP', conn:'M12',  proto:'PROFINET' },
+  { code:'FB',  pts:16, com:'NPN', conn:'M12',  proto:'PROFINET' },
+  { code:'FBN', pts:16, com:'PNP', conn:'M12',  proto:'PROFINET' },
+  // EtherNet/IP™
+  { code:'EA',  pts:32, com:'NPN', conn:'M12',  proto:'EtherNet/IP™' },
+  { code:'EAN', pts:32, com:'PNP', conn:'M12',  proto:'EtherNet/IP™' },
+  { code:'EB',  pts:16, com:'NPN', conn:'M12',  proto:'EtherNet/IP™' },
+  { code:'EBN', pts:16, com:'PNP', conn:'M12',  proto:'EtherNet/IP™' },
+  // Ethernet POWERLINK — マイナスコモン(PNP)のみ
+  { code:'GAN', pts:32, com:'PNP', conn:'M12',  proto:'Ethernet POWERLINK' },
+  { code:'GBN', pts:16, com:'PNP', conn:'M12',  proto:'Ethernet POWERLINK' },
+  // IO-Link — マイナスコモン(PNP)・32点のみ
+  { code:'KAN', pts:32, com:'PNP', conn:'M12',  proto:'IO-Link' },
+  // CC-Link IE TSN — マイナスコモン(PNP)・32点のみ・RJ45(IP40)
+  { code:'CAN', pts:32, com:'PNP', conn:'RJ45', proto:'CC-Link IE TSN' },
+  // 安全通信プロトコル — マイナスコモン(PNP)のみ
+  { code:'FPN', pts:32, com:'PNP', conn:'M12',  proto:'PROFIsafe（安全通信）' },
+  { code:'DPN', pts:32, com:'PNP', conn:'M12',  proto:'Safety over EtherCAT（安全通信）' },
+    ];
 
 const OPTION_DEFS = {
   // ── slot type（バルブの代わりに1連使用）──
@@ -2311,53 +2392,7 @@ function renderConnDetail() {
     // EX260: ① プロトコル → ② 出力点数 → ③ 出力極性 → 自動確定
     // カタログp.530 SIユニット仕様表準拠。
     // com: 'NPN'=プラスコモン（無記号系）/ 'PNP'=マイナスコモン（末尾N系）
-    const ex260All = [
-      { code:'0',   pts:32, com:'—',   conn:'—',    proto:'SIユニットなし' },
-      // DeviceNet® — 32点/16点、M12
-      { code:'QA',  pts:32, com:'NPN', conn:'M12',  proto:'DeviceNet®' },
-      { code:'QAN', pts:32, com:'PNP', conn:'M12',  proto:'DeviceNet®' },
-      { code:'QB',  pts:16, com:'NPN', conn:'M12',  proto:'DeviceNet®' },
-      { code:'QBN', pts:16, com:'PNP', conn:'M12',  proto:'DeviceNet®' },
-      // PROFIBUS DP — 32/16点 × M12/D-sub
-      { code:'NA',  pts:32, com:'NPN', conn:'M12',  proto:'PROFIBUS DP' },
-      { code:'NAN', pts:32, com:'PNP', conn:'M12',  proto:'PROFIBUS DP' },
-      { code:'NB',  pts:16, com:'NPN', conn:'M12',  proto:'PROFIBUS DP' },
-      { code:'NBN', pts:16, com:'PNP', conn:'M12',  proto:'PROFIBUS DP' },
-      { code:'NC',  pts:32, com:'NPN', conn:'D-sub',proto:'PROFIBUS DP' },
-      { code:'NCN', pts:32, com:'PNP', conn:'D-sub',proto:'PROFIBUS DP' },
-      { code:'ND',  pts:16, com:'NPN', conn:'D-sub',proto:'PROFIBUS DP' },
-      { code:'NDN', pts:16, com:'PNP', conn:'D-sub',proto:'PROFIBUS DP' },
-      // CC-Link
-      { code:'VA',  pts:32, com:'NPN', conn:'M12',  proto:'CC-Link' },
-      { code:'VAN', pts:32, com:'PNP', conn:'M12',  proto:'CC-Link' },
-      { code:'VB',  pts:16, com:'NPN', conn:'M12',  proto:'CC-Link' },
-      { code:'VBN', pts:16, com:'PNP', conn:'M12',  proto:'CC-Link' },
-      // EtherCAT
-      { code:'DA',  pts:32, com:'NPN', conn:'M12',  proto:'EtherCAT' },
-      { code:'DAN', pts:32, com:'PNP', conn:'M12',  proto:'EtherCAT' },
-      { code:'DB',  pts:16, com:'NPN', conn:'M12',  proto:'EtherCAT' },
-      { code:'DBN', pts:16, com:'PNP', conn:'M12',  proto:'EtherCAT' },
-      // PROFINET
-      { code:'FA',  pts:32, com:'NPN', conn:'M12',  proto:'PROFINET' },
-      { code:'FAN', pts:32, com:'PNP', conn:'M12',  proto:'PROFINET' },
-      { code:'FB',  pts:16, com:'NPN', conn:'M12',  proto:'PROFINET' },
-      { code:'FBN', pts:16, com:'PNP', conn:'M12',  proto:'PROFINET' },
-      // EtherNet/IP™
-      { code:'EA',  pts:32, com:'NPN', conn:'M12',  proto:'EtherNet/IP™' },
-      { code:'EAN', pts:32, com:'PNP', conn:'M12',  proto:'EtherNet/IP™' },
-      { code:'EB',  pts:16, com:'NPN', conn:'M12',  proto:'EtherNet/IP™' },
-      { code:'EBN', pts:16, com:'PNP', conn:'M12',  proto:'EtherNet/IP™' },
-      // Ethernet POWERLINK — マイナスコモン(PNP)のみ
-      { code:'GAN', pts:32, com:'PNP', conn:'M12',  proto:'Ethernet POWERLINK' },
-      { code:'GBN', pts:16, com:'PNP', conn:'M12',  proto:'Ethernet POWERLINK' },
-      // IO-Link — マイナスコモン(PNP)・32点のみ
-      { code:'KAN', pts:32, com:'PNP', conn:'M12',  proto:'IO-Link' },
-      // CC-Link IE TSN — マイナスコモン(PNP)・32点のみ・RJ45(IP40)
-      { code:'CAN', pts:32, com:'PNP', conn:'RJ45', proto:'CC-Link IE TSN' },
-      // 安全通信プロトコル — マイナスコモン(PNP)のみ
-      { code:'FPN', pts:32, com:'PNP', conn:'M12',  proto:'PROFIsafe（安全通信）' },
-      { code:'DPN', pts:32, com:'PNP', conn:'M12',  proto:'Safety over EtherCAT（安全通信）' },
-    ];
+    const ex260All = EX260_ALL;
 
     // プロトコル一覧（重複なし）
     var protoList = [];
@@ -5999,6 +6034,331 @@ function scheduleAutosave() {
       if (S.series) localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(collectState()));
     } catch(e) { /* localStorage不可環境では無視 */ }
   }, 400);
+}
+
+// ════════════════════════════════════════════════════
+// 品番逆引き（マニホールド品番＋バルブ品番CSV → UI反映）
+// CSVは1行=1連、先頭行がD側1連目
+// ════════════════════════════════════════════════════
+function _pnNormalize(s) {
+  return String(s || '')
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, function(c){ return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+    .replace(/[－ー―‐]/g, '-')
+    .replace(/\s+/g, '')
+    .toUpperCase();
+}
+
+// 配線コード（型式typの後ろ〜連数の前）を解釈してセッターを呼ぶ
+function _applyWiringCode(code) {
+  var m, notes = [];
+  var isMetal = S.base === 'metal';
+  if ((m = code.match(/^(FW|F)([12])(S?)$/))) {
+    setWiring('dsub'); setConnType(m[1]); setConnDir(m[2]);
+    if (m[3] && typeof setMetalFlatS === 'function') setMetalFlatS('S');
+    else if (isMetal && typeof setMetalFlatS === 'function') setMetalFlatS('');
+    return true;
+  }
+  if ((m = code.match(/^(PG|PH|P)([12])(S?)$/))) {
+    setWiring('flat'); setConnType(m[1]); setConnDir(m[2]);
+    if (m[3] && typeof setMetalFlatS === 'function') setMetalFlatS('S');
+    else if (isMetal && typeof setMetalFlatS === 'function') setMetalFlatS('');
+    return true;
+  }
+  if (code === 'TC') { setWiring('term_sp'); return true; }
+  if (code === 'T')  { setWiring('term'); return true; }
+  if ((m = code.match(/^L([123])([123])$/))) { setWiring('lead'); setLeadNum(m[1]); setLeadLen(m[2]); return true; }
+  if (code === 'M12') { setWiring('m12'); return true; }
+  if (code === 'M')   { setWiring('multi'); return true; }
+  if ((m = code.match(/^SW([123])(N?)$/))) {
+    setWiring('wireless');
+    setWirelessNum(m[1]);
+    if (typeof setWirelessPnp === 'function') setWirelessPnp(!!m[2]);
+    return true;
+  }
+  if ((m = code.match(/^S6(EP|WS|EB|DA|FA|FB|Q|N|V|0)([2-9])?([1-9])?$/))) {
+    setWiring('ex600'); setEx600Si(m[1]);
+    if (m[2]) setEx600Io(m[2]);
+    return { ok: true, note: m[3] ? ('EX600 I/Oユニット' + m[3] + '連: 機種はStep5で選択してください') : null };
+  }
+  if ((m = code.match(/^S5(N?)(S?)$/))) { setWiring('ex510'); setEx510N(m[1]); setEx510S(m[2]); return true; }
+  if ((m = code.match(/^S4([A-Z0-9]+)$/))) { setWiring('ex126'); if (typeof setEx126Si === 'function') setEx126Si(m[1]); return true; }
+  if ((m = code.match(/^S3(ZBN|ZB|Q|V|0)$/))) {
+    setWiring('ex120');
+    var protoMap = { '0':'none', Q:'DeviceNet', V:'CC-Link', ZB:'CompoNet', ZBN:'CompoNet' };
+    if (typeof setEx120Proto === 'function') setEx120Proto(protoMap[m[1]]);
+    if (m[1] === 'ZB' || m[1] === 'ZBN') setEx120Si(m[1]);
+    return true;
+  }
+  if ((m = code.match(/^S8(.*)$/))) {
+    setWiring('ex180');
+    return { ok: true, note: m[1] ? ('EX180詳細コード「' + m[1] + '」はStep5で選択してください') : null };
+  }
+  if ((m = code.match(/^S(AAN|ABN|ACN)(?:Y([1-8]))?$/))) {
+    setWiring('ex245'); setEx245Si(m[1]);
+    if (typeof setEx245IoMod === 'function') setEx245IoMod(m[2] ? 'Y' : '');
+    if (m[2]) setEx245Io(m[2]);
+    return true;
+  }
+  if (code === 'SA3N' || code === 'S') {
+    setWiring('ex500'); setEx500Si(code === 'SA3N' ? 'A3N' : '');
+    return true;
+  }
+  if (code.charAt(0) === 'S') {
+    var body = code.slice(1);
+    var e260 = EX260_ALL.find(function(o){ return o.code === body; });
+    if (e260) {
+      setWiring('ex260');
+      if (typeof setEx260Pts === 'function') setEx260Pts(String(e260.pts));
+      setEx260Si(e260.code);
+      return true;
+    }
+    if ((m = body.match(/^(TA|TB|TC|TD|ZE|Q|0)(?:([1-8])([A-F]))?$/))) {
+      setWiring('ex250'); setEx250Si(m[1]);
+      if (m[1] !== '0') { setEx250Io(m[2] || ''); if (m[2]) setEx250Spec(m[3]); }
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseManifoldPN(raw) {
+  var pn = _pnNormalize(raw);
+  if (!pn) return { ok: false, error: 'マニホールド品番が空です' };
+  var m = pn.match(/^SS5Y([357])-(M1[012]|5[012]|1[012])([A-Z0-9]*?)-(\d{2})(.*)$/);
+  if (!m) return { ok: false, error: '品番形式を解釈できません: ' + pn + '（例: SS5Y3-10F2-05U-C6）' };
+  var notes = [];
+  resetAll();
+  setSeries(m[1]);
+  var typ = m[2];
+  var base = typ.charAt(0) === 'M' ? 'mixed' : typ.charAt(0) === '5' ? 'metal' : 'conn';
+  var pipeDigit = typ.charAt(typ.length - 1);
+  var pipe = pipeDigit === '0' ? '横配管' : pipeDigit === '1' ? '裏配管' : '上配管';
+  setBase(base); setPipe(pipe);
+  var wres = _applyWiringCode(m[3]);
+  if (!wres) return { ok: false, error: '配線方式コードを解釈できません: 「' + m[3] + '」' };
+  if (wres && wres.note) notes.push(wres.note);
+  var cnt = parseInt(m[4], 10);
+  if (cnt < 2 || cnt > 24) return { ok: false, error: '連数が範囲外です: ' + m[4] };
+  S.valveCount = cnt;
+  while (S.valveTypes.length < cnt) S.valveTypes.push('single');
+  S.valveTypes = S.valveTypes.slice(0, cnt);
+  if (S.valveSpecs) S.valveSpecs = S.valveSpecs.slice(0, cnt);
+  var vv = document.getElementById('valve-val'); if (vv) vv.textContent = cnt;
+  markStep(6, 'done');
+
+  var rest = m[5] || '';
+  var isSpecialW = EPORT_SPECIAL_WIRINGS.indexOf(S.wiring) >= 0;
+  var epSel = document.getElementById('sel-eport');
+  function applyEport(ep) {
+    if (isSpecialW) {
+      var found = null;
+      Object.keys(EPORT_COMBINED).forEach(function(pos){
+        Object.keys(EPORT_COMBINED[pos]).forEach(function(pil){
+          if (EPORT_COMBINED[pos][pil] === ep) found = { pos: pos, pil: pil };
+        });
+      });
+      if (!found) return 'P,Eポート記号を解釈できません: ' + ep;
+      if (epSel) epSel.value = found.pos;
+      setEportPilot(found.pil);
+      return null;
+    }
+    var em = ep.match(/^([UDB])([SR]?)$/);
+    if (!em) return 'P,Eポート記号を解釈できません: ' + ep;
+    if (epSel) epSel.value = em[1];
+    if (typeof setEportAssy === 'function') setEportAssy(em[2] || '');
+    return null;
+  }
+  function applyMount(mc) {
+    if (mc === 'AA' || mc === 'BA') { setMountMethod('direct'); if (typeof setMountOpt === 'function') setMountOpt(true, mc === 'AA'); return; }
+    if (mc && mc.charAt(0) === 'D') { setMountMethod('din'); setMountDinLen(mc === 'D' ? '' : mc.slice(1)); return; }
+    setMountMethod('direct');
+  }
+
+  if (pipe === '上配管') {
+    // -{count}{eport}{N?}{mount}（コネクタベースのみP,E口径N）
+    var um = rest.match(/^([UDB][SR]?|[CEFGHJ])(N?)(AA|BA|D\d*)?$/);
+    if (!um) return { ok: false, error: '連数以降を解釈できません: ' + rest };
+    var epErr = applyEport(um[1]);
+    if (epErr) return { ok: false, error: epErr };
+    if (base === 'conn' && typeof setConnUpperPePort === 'function') setConnUpperPePort(um[2] || '');
+    applyMount(um[3] || '');
+    notes.push('上配管形: A,Bポート口径は各バルブ品番側で確認してください');
+  } else {
+    var sm = rest.match(/^([A-Z]{0,2})-([A-Z0-9]*)$/);
+    if (!sm) return { ok: false, error: '連数以降を解釈できません: ' + rest };
+    var epErr2 = applyEport(sm[1] || 'U');
+    if (epErr2) return { ok: false, error: epErr2 };
+    var pm = sm[2].match(/^(C\d+|CM|LM|M5|0[123])?([FN]?)(AA|BA|D\d*)?$/);
+    if (!pm || (sm[2] && !pm[0])) return { ok: false, error: '口径/取付コードを解釈できません: ' + sm[2] };
+    if (pm[1]) {
+      if (base === 'mixed' && /^C\d{2,3}$/.test(pm[1]) && pm[1] !== 'CM') {
+        // 混合口径 C{大}{小}（例 C86 / C128）
+        var digits = pm[1].slice(1);
+        var big, small;
+        if (digits.length === 3) { big = digits.slice(0, 2); small = digits.slice(2); }
+        else { big = digits.charAt(0); small = digits.charAt(1); }
+        S.mixBig = big; S.mixSmall = small; S.abCode = pm[1];
+      } else {
+        if (typeof setAbPipeType === 'function') setAbPipeType('st');
+        setAbCode(pm[1]);
+        if (pm[1] === 'CM' || pm[1] === 'LM') notes.push('口径混合(' + pm[1] + '): 各バルブの口径はバルブ品番側で反映されます');
+      }
+    }
+    if (pm[2] && base === 'metal' && typeof setSubScrew === 'function') setSubScrew(pm[2]);
+    applyMount(pm[3] || '');
+  }
+  updateAll();
+  return { ok: true, notes: notes };
+}
+
+// バルブ品番1件を解釈（適用はせず結果を返す）
+function parseValvePNText(raw) {
+  var pn = _pnNormalize(raw);
+  if (!pn) return null;
+  if (/^(ブランク|BLANK|空|無|-{1,2}|—)$/.test(raw.trim()) || /^ブランク/.test(raw.trim())) return { blank: true };
+  var m;
+  if ((m = pn.match(/^SY([357])0M-26-2A/))) return { series: m[1], blank: true };
+  if ((m = pn.match(/^SY([357])0M-26-1A/))) return { series: m[1], slotBlanking: true };
+  var typeMap = { '1':'single','2':'double','3':'3cs','4':'3es','5':'3ps','A':'4pos','B':'dual','C':'3port' };
+  var lampRe = '(NZ|NS|Z|S|R|U)?';
+  // 残圧排気弁付（…-5U1E）
+  if ((m = pn.match(new RegExp('^SY([57])30([01])([BK]?)(T?)-([56])' + lampRe + '(D|E|F)?1E(?:-([BKH]))?$')))) {
+    return { series: m[1], special: 'residual', type: '3cs', seal: m[2], pilotOpt: m[3], coil: m[4],
+             voltage: m[5], lamp: m[6] || '', manual: m[7] || '', screw: m[8] || '' };
+  }
+  // 真空対応（SY□A0R…）
+  if ((m = pn.match(new RegExp('^SY([357])A([03])R(T?)-([56])' + lampRe + '(D|E|F)?1(?:-([A-Z0-9]+))?(?:-([BKH]))?$')))) {
+    return { series: m[1], special: 'vacuum', type: 'single', coil: m[3], voltage: m[4], lamp: m[5] || '',
+             manual: m[6] || '', vacBport: m[7] || '', screw: m[8] || '' };
+  }
+  // 圧力センサ付き（…-P□）
+  if ((m = pn.match(new RegExp('^SY([57])([12345ABC])3([01])(R?)(H?)([BK]?)(T?)-([56])' + lampRe + '(D|E|F)?1-C6([FN]?)(?:-([BKH]))?-P([1-9])$')))) {
+    return { series: m[1], special: 'pressure', type: typeMap[m[2]], seal: m[3], pilot: m[4] ? 'R' : '',
+             backpress: m[5], pilotOpt: m[6], coil: m[7], voltage: m[8], lamp: m[9] || '', manual: m[10] || '',
+             portScrew: m[11] || '', screw: m[12] || '', sensorCount: m[13] };
+  }
+  // 通常バルブ
+  if ((m = pn.match(new RegExp('^SY([357])([12345ABC])([03])([01])(R?)(H?)([BK]?)(T?)-([56])' + lampRe + '(D|E|F)?1(?:-(C\\d+|N\\d+|M5|0[123])([FN]?))?(?:-([BKH]))?(?:-X90)?$')))) {
+    return { series: m[1], type: typeMap[m[2]], upper: m[3] === '3', seal: m[4], pilot: m[5] ? 'R' : '',
+             backpress: m[6], pilotOpt: m[7], coil: m[8], voltage: m[9], lamp: m[10] || '', manual: m[11] || '',
+             portSize: m[12] || '', portScrew: m[13] || '', screw: m[14] || '', fluoroRubber: /-X90$/.test(pn) };
+  }
+  return { error: '解釈できません: ' + pn + '（例: SY3100-5U1 / SY3200R-5ZD1 / SY5300-5U1E）' };
+}
+
+// バルブCSV（1行=1連・先頭行=D側1連目）を適用
+function applyValveCsv(text) {
+  var lines = String(text || '').split(/\r?\n/).map(function(l){ return l.trim(); });
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  var report = [], okCount = 0;
+  if (!lines.length) return { okCount: 0, report: ['バルブ品番がありません'] };
+  if (!S.series) return { okCount: 0, report: ['先にマニホールド品番を反映するかシリーズを選択してください'] };
+  var n = Math.max(2, Math.min(lines.length, getWiringLimits().st));
+  if (lines.length > getWiringLimits().st) report.push('⚠ 行数' + lines.length + 'が連数上限' + getWiringLimits().st + 'を超えています（超過分は無視）');
+  S.valveCount = n;
+  while (S.valveTypes.length < n) S.valveTypes.push('single');
+  S.valveTypes = S.valveTypes.slice(0, n);
+  if (S.valveSpecs) S.valveSpecs = S.valveSpecs.slice(0, n);
+  var vv = document.getElementById('valve-val'); if (vv) vv.textContent = n;
+  markStep(6, 'done');
+  for (var i = 0; i < n; i++) {
+    var line = lines[i] || '';
+    var cells = line.split(/[,\t;]/).map(function(c){ return c.trim(); }).filter(Boolean);
+    var cand = cells.find(function(c){ return /^SY/i.test(_pnNormalize(c)); }) || cells.find(function(c){ return !/^\d+$/.test(c); }) || '';
+    var r = cand ? parseValvePNText(cand) : { blank: true };
+    var spec = getValveSpec(i);
+    if (!r) r = { blank: true };
+    if (r.error) { report.push((i + 1) + '連目: ' + r.error); continue; }
+    if (r.series && r.series !== S.series) {
+      report.push((i + 1) + '連目: シリーズ不一致（マニホールド=SY' + S.series + '000 / バルブ=SY' + r.series + '000）');
+      continue;
+    }
+    if (r.blank || r.slotBlanking) {
+      if (r.slotBlanking) {
+        if (!spec.manifoldOpt) spec.manifoldOpt = getDefaultSpec('single').manifoldOpt;
+        spec.manifoldOpt.slot = 'blanking';
+        S.valveTypes[i] = 'single';
+      } else {
+        S.valveTypes[i] = 'blank';
+        spec.type = 'blank';
+      }
+      okCount++;
+      continue;
+    }
+    spec.type = r.type; S.valveTypes[i] = r.type;
+    spec.special = r.special || null;
+    spec.seal = r.seal || '0';
+    spec.pilot = r.pilot || '';
+    spec.backpress = r.backpress || '';
+    spec.pilotOpt = r.pilotOpt || '';
+    spec.coil = r.coil || '';
+    spec.voltage = r.voltage || '5';
+    spec.lamp = r.lamp || '';
+    spec.manual = r.manual || '';
+    spec.screw = r.screw || '';
+    if (r.portSize) spec.portSize = r.portSize;
+    if (r.portScrew) spec.portScrew = r.portScrew;
+    if (r.vacBport) spec.vacBport = r.vacBport;
+    if (r.sensorCount) spec.sensorCount = r.sensorCount;
+    if (r.fluoroRubber) spec.fluoroRubber = true;
+    // lamp分解（UI用のlampLamp/lampSurge/lampCommonに反映）
+    var lc = r.lamp || '';
+    spec.lampCommon = (lc === 'Z' || lc === 'NS') ? 'N' : (lc === 'NZ') ? 'NM' : '';
+    spec.lampLamp   = (lc === 'R' || lc === 'S');
+    spec.lampSurge  = (lc === 'U' || lc === 'S' || lc === 'Z' || lc === 'NZ');
+    if (spec.manifoldOpt && spec.manifoldOpt.slot === 'blanking') spec.manifoldOpt.slot = null;
+    okCount++;
+  }
+  updateAll();
+  return { okCount: okCount, report: report };
+}
+
+// ─── 逆引きモーダル ───
+function showReversePNModal() {
+  var mdl = document.getElementById('reverse-pn-modal');
+  if (mdl) mdl.style.display = 'flex';
+}
+function closeReversePNModal() {
+  var mdl = document.getElementById('reverse-pn-modal');
+  if (mdl) mdl.style.display = 'none';
+}
+function runReversePN() {
+  var mpn = document.getElementById('rev-manifold-input').value;
+  var vcsv = document.getElementById('rev-valve-input').value;
+  var out = [];
+  var okAll = true;
+  if (mpn.trim()) {
+    var mres = parseManifoldPN(mpn);
+    if (!mres.ok) { out.push('✗ マニホールド: ' + mres.error); okAll = false; }
+    else {
+      out.push('✓ マニホールド品番を反映しました');
+      (mres.notes || []).forEach(function(nt){ out.push('ℹ ' + nt); });
+    }
+  }
+  if (vcsv.trim() && okAll) {
+    var vres = applyValveCsv(vcsv);
+    out.push('✓ バルブ ' + vres.okCount + '連を反映しました（D側=1行目）');
+    vres.report.forEach(function(rp){ out.push('✗ ' + rp); });
+    if (vres.report.length) okAll = false;
+  } else if (vcsv.trim() && !okAll) {
+    out.push('（マニホールド品番のエラーのためバルブCSVは未処理）');
+  }
+  if (!mpn.trim() && !vcsv.trim()) out.push('品番を入力してください');
+  else { var res = buildPN(); if (res) out.push('現在の生成品番: ' + res.full); }
+  var st = document.getElementById('rev-status');
+  st.style.display = '';
+  st.style.background = okAll ? '#f0fdf4' : '#fef2f2';
+  st.style.border = '1px solid ' + (okAll ? '#a7f3d0' : '#fecaca');
+  st.style.color = okAll ? '#064e3b' : '#7f1d1d';
+  st.innerHTML = out.map(function(l){ return l.replace(/</g,'&lt;'); }).join('<br>');
+}
+function loadReverseCsvFile(file) {
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function() {
+    document.getElementById('rev-valve-input').value = String(reader.result || '');
+  };
+  reader.readAsText(file);
 }
 
 function saveConfig() {
