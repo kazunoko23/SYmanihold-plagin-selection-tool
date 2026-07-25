@@ -1252,6 +1252,17 @@ function getMaxValveCountForWiring() {
   return getWiringLimits().st;
 }
 
+// EX250 入力ブロック連数の上限（AS-Interface対応SIのみ制限あり）
+// カタログは「最大連数に制限があります」としか記載がないため、SMC公式WEBカタログの
+// 品番確認で実測（2026-07-25）: TA/TC(8in/8out)=4連 / TB/TD(4in/4out)=2連。入力ブロック
+// 仕様（2点入力/4点入力）には依存しない。※JSY版は点数ベースの別ルール（README参照）
+function getEx250MaxInputBlocks() {
+  var si = S.ex250Si;
+  if (si === 'TA' || si === 'TC') return 4;
+  if (si === 'TB' || si === 'TD') return 2;
+  return 8;
+}
+
 function getMountCode() {
   if (!S.mountMethod) return null;
 
@@ -2082,7 +2093,8 @@ function renderConnDetail() {
       { code:'FA', proto:'PROFINET',                    detail:'FA — IO-Linkユニット対応',                          note:'' },
       { code:'FB', proto:'PROFINET (OPC UA)',            detail:'FB — IO-Link対応 / マイナスコモンのみ',             note:'' },
       { code:'WS', proto:'無線リモート',                detail:'WS',                                                note:'注3)' },
-      { code:'EP', proto:'CIP Safety（安全通信プロトコル）', detail:'EP — プラスコモン固定 / 7/8インチ電源コネクタ / 最大32連', note:'※11型裏配管形の寸法はp.569参照', special:true },
+      // カタログ 注1)「プラスコモン(NPN)の対応はありません」→ EPはマイナスコモン(PNP)のみ
+      { code:'EP', proto:'CIP Safety（安全通信プロトコル）', detail:'EP — マイナスコモン(PNP)固定 / 7/8インチ電源コネクタ / 最大32連', note:'※11型裏配管形の寸法はp.569参照', special:true },
     ];
     // ④ 出力極性コネクタ種類（極性別に整理）
     const connPlus  = [
@@ -2102,7 +2114,9 @@ function renderConnDetail() {
     const connList = polar === 'plus' ? connPlus : polar === 'minus' ? connMinus : [];
     const isSiNone = S.ex600Si === '0';
     const isSiEP   = S.ex600Si === 'EP';
-    // EP選択時: 出力極性・コネクタは固定（プラスコモン・7/8インチ=無記号）
+    // FB（PROFINET OPC UA対応）はマイナスコモンのみ（カタログ ③ 表）
+    const isMinusOnly600 = (S.ex600Si === 'FB');
+    // EP選択時: 出力極性・コネクタは固定（マイナスコモン・7/8インチ=無記号）
     if (isSiEP && S.ex600Io !== '') {
       S.ex600Io = '';
     }
@@ -2133,7 +2147,7 @@ function renderConnDetail() {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;color:#166534;">
               <div style="background:rgba(21,128,61,.08);border-radius:4px;padding:4px 8px;">
                 <div style="font-size:8px;color:#94a3b8;">出力極性</div>
-                <div style="font-weight:800;">プラスコモン (NPN)</div>
+                <div style="font-weight:800;">マイナスコモン (PNP)</div>
               </div>
               <div style="background:rgba(21,128,61,.08);border-radius:4px;padding:4px 8px;">
                 <div style="font-size:8px;color:#94a3b8;">プロトコル</div>
@@ -2153,20 +2167,21 @@ function renderConnDetail() {
               </div>
             </div>
             <div style="margin-top:5px;font-size:8px;color:#94a3b8;line-height:1.5;">
-              注) マイナスコモン(PNP)の対応はありません。32点出力の設定のみです。<br>
+              注) プラスコモン(NPN)の対応はありません。32点出力の設定のみです。<br>
               フィールドバスモジュールと安全I/Oモジュールは必ず手配ください。
             </div>
           </div>` : `
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
-            <div onclick="setEx600IoPolar('plus')" style="border:1.5px solid ${polar==='plus'?'var(--blue)':'var(--border)'};border-radius:6px;padding:7px 4px;cursor:pointer;text-align:center;background:${polar==='plus'?'#ebf3ff':'#fff'};transition:all .12s;">
-              <div style="font-size:11px;font-weight:800;color:${polar==='plus'?'var(--blue)':'var(--text)'};">プラスコモン</div>
+            <div onclick="${isMinusOnly600?'':"setEx600IoPolar('plus')"}" style="border:1.5px solid ${polar==='plus'?'var(--blue)':isMinusOnly600?'#e8ecf4':'var(--border)'};border-radius:6px;padding:7px 4px;cursor:${isMinusOnly600?'default':'pointer'};text-align:center;background:${polar==='plus'?'#ebf3ff':isMinusOnly600?'#f8fafc':'#fff'};transition:all .12s;opacity:${isMinusOnly600?.4:1};">
+              <div style="font-size:11px;font-weight:800;color:${polar==='plus'?'var(--blue)':isMinusOnly600?'#bbb':'var(--text)'};">プラスコモン</div>
               <div style="font-size:8px;color:#94a3b8;">NPN / 品番: 2/3/6/8</div>
             </div>
             <div onclick="setEx600IoPolar('minus')" style="border:1.5px solid ${polar==='minus'?'var(--blue)':'var(--border)'};border-radius:6px;padding:7px 4px;cursor:pointer;text-align:center;background:${polar==='minus'?'#ebf3ff':'#fff'};transition:all .12s;">
               <div style="font-size:11px;font-weight:800;color:${polar==='minus'?'var(--blue)':'var(--text)'};">マイナスコモン</div>
               <div style="font-size:8px;color:#94a3b8;">PNP / 品番: 4/5/7/9</div>
             </div>
-          </div>`}
+          </div>
+          ${isMinusOnly600 ? `<div style="margin-top:4px;font-size:8px;color:#94a3b8;">※ FB（PROFINET OPC UA対応）はマイナスコモンのみです。</div>` : ''}`}
       </div>` : ''}
       ${polar && !isSiNone && !isSiEP ? `
       <div class="sub-select" style="margin-top:5px;">
@@ -2320,6 +2335,9 @@ function renderConnDetail() {
       { code:'ACN', proto:'PROFINET',         connComm:'M12 × 2個',                connPow:'7/8インチ × 2個',         isNone:false },
     ];
     const isMod = S.ex245IoMod;
+    // SIユニットなし(0)は④⑤とも無記号固定（カタログ ④⑤注記）
+    const isSiNone245 = S.ex245Si === '0';
+    if (isSiNone245) { S.ex245IoMod = ''; S.ex245Io = null; }
     body.innerHTML = `
       <div class="sub-select">
         <div class="sub-lbl">③ SIユニット仕様</div>
@@ -2332,12 +2350,12 @@ function renderConnDetail() {
               + '<span style="font-size:12px;font-weight:800;color:' + (sel?'var(--blue)':'var(--text)') + ';">' + o.proto + '</span>'
               + '<span style="font-family:var(--mono);font-size:9px;color:' + (sel?'var(--blue)':'#94a3b8') + ';background:' + (sel?'rgba(45,123,212,.1)':'#f1f5f9') + ';padding:1px 6px;border-radius:3px;">' + o.code + '</span>'
               + '</div>'
-              + (!o.isNone ? '<div style="font-size:8px;color:#94a3b8;line-height:1.5;">通信: ' + o.connComm + ' / 電源: ' + o.connPow + '</div>' : '<div style="font-size:8px;color:#94a3b8;">入出力モジュールのみ使用可</div>')
+              + (!o.isNone ? '<div style="font-size:8px;color:#94a3b8;line-height:1.5;">通信: ' + o.connComm + ' / 電源: ' + o.connPow + '</div>' : '<div style="font-size:8px;color:#94a3b8;">入出力モジュールは取付できません（④⑤は無記号）</div>')
               + '</div>';
           }).join('')}
         </div>
       </div>
-      ${S.ex245Si !== null ? `
+      ${(S.ex245Si !== null && !isSiNone245) ? `
       <div class="sub-select" style="margin-top:6px;">
         <div class="sub-lbl">④ 入出力モジュール</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
@@ -2394,9 +2412,16 @@ function renderConnDetail() {
       + ex250SiOpts.map(function(o){ return '<div onclick="setEx250Si(\'' + o.code + '\')" style="border:1.5px solid '+(S.ex250Si===o.code?'var(--blue)':'var(--border)')+';border-radius:5px;padding:5px 9px;cursor:pointer;background:'+(S.ex250Si===o.code?'#ebf3ff':'#fff')+';transition:all .12s;"><span style="font-weight:800;font-size:10px;color:'+(S.ex250Si===o.code?'var(--blue)':'var(--text)')+';min-width:28px;display:inline-block;">'+o.code+'</span> <span style="font-size:9px;color:'+(S.ex250Si===o.code?'var(--blue)':'var(--sub)')+';">'+o.label+(o.note?' <span style=\'color:#94a3b8\'>'+o.note+'</span>':'')+'</span></div>'; }).join('')
       + '</div></div>'
       + (S.ex250Si !== null && !siNone250
-        ? '<div class="sub-select" style="margin-top:5px;"><div class="sub-lbl">② 入力ブロック連数（無記号〜8連）</div><div style="display:grid;grid-template-columns:repeat(9,1fr);gap:3px;margin-top:4px;">'
-          + ['','1','2','3','4','5','6','7','8'].map(function(c){ var sel=S.ex250Io===c; return '<div onclick="setEx250Io(\'' + c + '\')" style="border:1.5px solid '+(sel?'var(--blue)':'var(--border)')+';border-radius:4px;padding:5px 2px;cursor:pointer;text-align:center;background:'+(sel?'#ebf3ff':'#fff')+';transition:all .12s;"><div style="font-size:11px;font-weight:700;color:'+(sel?'var(--blue)':'var(--text)')+';">'+(c||'無')+'</div></div>'; }).join('')
-          + '</div></div>'
+        ? (function(){
+            var maxIo250 = getEx250MaxInputBlocks();
+            return '<div class="sub-select" style="margin-top:5px;"><div class="sub-lbl">② 入力ブロック連数（無記号〜' + maxIo250 + '連）</div><div style="display:grid;grid-template-columns:repeat(9,1fr);gap:3px;margin-top:4px;">'
+              + ['','1','2','3','4','5','6','7','8'].map(function(c){
+                  var sel=S.ex250Io===c;
+                  var dis=(c !== '' && parseInt(c) > maxIo250);
+                  return '<div onclick="' + (dis?'':('setEx250Io(\'' + c + '\')')) + '" style="border:1.5px solid '+(sel?'var(--blue)':dis?'#e8ecf4':'var(--border)')+';border-radius:4px;padding:5px 2px;cursor:'+(dis?'default':'pointer')+';text-align:center;background:'+(sel?'#ebf3ff':dis?'#f8fafc':'#fff')+';transition:all .12s;opacity:'+(dis?.4:1)+';"><div style="font-size:11px;font-weight:700;color:'+(sel?'var(--blue)':dis?'#bbb':'var(--text)')+';">'+(c||'無')+'</div></div>'; }).join('')
+              + '</div>' + (maxIo250 < 8 ? '<div style="margin-top:4px;font-size:8px;color:#94a3b8;">※ AS-Interface対応（' + S.ex250Si + '）は入力ブロック最大' + maxIo250 + '連です。</div>' : '')
+              + '</div>';
+          })()
         : '')
       + (S.ex250Io
         ? '<div class="sub-select" style="margin-top:5px;"><div class="sub-lbl">③ 入力ブロック仕様</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-top:4px;">'
@@ -5920,24 +5945,27 @@ function renderMountBody() {
            &#9432; <strong>EX600 CIP Safety + 上配管</strong>の取付方法は<strong>D（DINレール金具付）</strong>または<strong>D0（DINレール金具付・レールなし）</strong>のみです。
          </div>` : '';
 
-    // D/D0 選択
+    // D/D0 選択（EX600 SIユニットなしはD0のみ＝レール品は別途手配）
     let lenHtml = isEx600Ep
       ? `<div style="font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:.1em;font-family:var(--mono);margin-bottom:4px;">DINレール（D / D0のみ）</div>`
+      : isSiNone
+      ? `<div style="font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:.1em;font-family:var(--mono);margin-bottom:4px;">DINレール（D0のみ）</div>`
       : `<div style="font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:.1em;font-family:var(--mono);margin-bottom:4px;">DINレール長さ（□）</div>`;
     lenHtml += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:5px;">`;
     [{val:'',label:'D',sub:'標準長さ（レール付）'},{val:'0',label:'D0',sub:'DIN金具付・レールなし'}].forEach(s => {
       const sel = sq === s.val;
-      lenHtml += `<div onclick="setMountDinLen('${s.val}')"
-        style="border:1.5px solid ${sel?'var(--blue)':'var(--border)'};border-radius:5px;padding:6px 8px;
-               cursor:pointer;text-align:center;background:${sel?'#ebf3ff':'#fff'};transition:all .12s;">
-        <div style="font-size:12px;font-weight:800;color:${sel?'var(--blue)':'var(--text)'};">${s.label}</div>
+      const dis = isSiNone && s.val !== '0';   // SIなしはD不可
+      lenHtml += `<div onclick="${dis?'':`setMountDinLen('${s.val}')`}"
+        style="border:1.5px solid ${sel?'var(--blue)':dis?'#e8ecf4':'var(--border)'};border-radius:5px;padding:6px 8px;
+               cursor:${dis?'default':'pointer'};text-align:center;background:${sel?'#ebf3ff':dis?'#f8fafc':'#fff'};transition:all .12s;opacity:${dis?.4:1};">
+        <div style="font-size:12px;font-weight:800;color:${sel?'var(--blue)':dis?'#bbb':'var(--text)'};">${s.label}</div>
         <div style="font-size:8px;color:#94a3b8;">${s.sub}</div>
       </div>`;
     });
     lenHtml += `</div>`;
 
-    // D3〜D24: EX600+EP+上配管時は非表示、それ以外はバルブ連数より大きい値のみ
-    if (!isEx600Ep) {
+    // D3〜D24: EX600+EP+上配管・EX600 SIなし時は非表示、それ以外はバルブ連数より大きい値のみ
+    if (!isEx600Ep && !isSiNone) {
     const maxDin = getMaxValveCountForWiring(); // 型式・配線方式による最大連数
     lenHtml += `<div style="font-size:9px;color:#94a3b8;margin-bottom:3px;">連数指定（バルブ連数より長い・最大${maxDin}連まで選択可）</div>`;
     lenHtml += `<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:3px;margin-bottom:10px;">`;
@@ -6025,9 +6053,10 @@ function setMountDinLen(v) {
 function updateMountOptions() {
   // 金属+裏配管(51型): DINレール不可 → ボタン非表示・直接取付に強制
   // EX245: 直接取付のみ（カタログ記載）
-  // EX260 SIユニットなし: DINレール不可
+  // EX250/EX260 SIユニットなし: DINレール不可
   const isEx260SiNone = (S.wiring === 'ex260' && S.ex260Si === '0');
-  const isDirectOnly = (S.base === 'metal' && S.pipe === '裏配管') || (S.wiring === 'ex245') || isEx260SiNone;
+  const isEx250SiNone = (S.wiring === 'ex250' && S.ex250Si === '0');  // カタログ ⑨注3
+  const isDirectOnly = (S.base === 'metal' && S.pipe === '裏配管') || (S.wiring === 'ex245') || isEx260SiNone || isEx250SiNone;
   const dinBtn = document.getElementById('mth-din');
   const grid   = document.getElementById('mth-btn-grid');
   if (dinBtn) {
@@ -6042,6 +6071,17 @@ function updateMountOptions() {
   if (S.mountDinLen && !isNaN(S.mountDinLen)) {
     var maxDinCheck = getMaxValveCountForWiring();
     if (parseInt(S.mountDinLen) > maxDinCheck) S.mountDinLen = null;
+  }
+  // DINレール長さ□は「バルブ連数より長い」ことが条件（カタログ ⑨注1）
+  // 連数を後から増やした場合に短いレール指定が残るのを防ぐ
+  // ※ ''（標準長さ）と '0'（レールなし）は連数指定ではないので対象外
+  if (S.mountDinLen && S.mountDinLen !== '0' && !isNaN(S.mountDinLen)
+      && parseInt(S.mountDinLen) <= S.valveCount) {
+    S.mountDinLen = null;
+  }
+  // EX600 SIユニットなし(S60): DINレール金具付(D0)のみ・レール付きDは選択不可
+  if (S.wiring === 'ex600' && S.ex600Si === '0' && S.mountMethod === 'din' && S.mountDinLen !== '0') {
+    S.mountDinLen = '0';
   }
   renderMountBody();
 }
@@ -6656,6 +6696,23 @@ function sanitizeAllValves() {
   if (S.manifestOpts && S.manifestOpts['conn_cable'] && S.wiring !== 'dsub' && S.wiring !== 'flat') {
     delete S.manifestOpts['conn_cable'];
   }
+  // EX245: SIユニットなし(0)は入出力モジュール④⑤とも無記号（カタログ ④⑤注記）
+  if (S.wiring === 'ex245' && S.ex245Si === '0') { S.ex245IoMod = ''; S.ex245Io = null; }
+  // EX250: AS-Interface対応SIの入力ブロック連数上限を超えていたらクランプ
+  if (S.wiring === 'ex250' && S.ex250Io) {
+    var mxIo250 = getEx250MaxInputBlocks();
+    if (parseInt(S.ex250Io) > mxIo250) S.ex250Io = String(mxIo250);
+  }
+  // EX600: FB（PROFINET OPC UA対応）はマイナスコモンのみ → プラス系コネクタ(2/3/6/8)を解除
+  if (S.wiring === 'ex600' && S.ex600Si === 'FB'
+      && (S.ex600IoPolar === 'plus' || ['2','3','6','8'].indexOf(S.ex600Io) >= 0)) {
+    S.ex600IoPolar = 'minus';
+    S.ex600Io = null;
+  }
+  // EX600: SIユニットあり（0/EP以外）は④の出力極性+コネクタが必須（無記号はSIなしのみ）
+  if (S.wiring === 'ex600' && S.ex600Si && S.ex600Si !== '0' && S.ex600Si !== 'EP' && S.ex600Io === '') {
+    S.ex600Io = null;
+  }
   // 連数: 配線方式の上限超過をクランプ（配線切替後に旧連数が残るのを防ぐ）
   if (S.wiring) {
     var stLimS = getWiringLimits().st;
@@ -6696,6 +6753,13 @@ function sanitizeAllValves() {
     if (siR === 'P' && spec.lampCommon !== 'NM') {
       spec.lampCommon = 'NM'; spec.lampSurge = true;
       spec.lamp = deriveLampCode(spec.lampLamp, true, 'NM');
+    }
+    // 節電コイル(T)はZ/NZのみ（ランプ+サージ付・コモン必須。U=無極性の設定はない）
+    // UI操作では強制済みだが、JSON読込・逆引き経由の残留を封鎖する
+    if (spec.coil === 'T') {
+      if (spec.lampCommon !== 'N' && spec.lampCommon !== 'NM') spec.lampCommon = 'N';
+      spec.lampLamp = true; spec.lampSurge = true;
+      spec.lamp = deriveLampCode(true, true, spec.lampCommon);
     }
   }
 }
@@ -7651,7 +7715,10 @@ function exportExcel() {
         bom.push(['オプション', slot+'連目付属', getBlockingDiscPN(series,'sup'), 'SUP.ブロッキングディスク']);
       }
       if (opt.blockingDiscExh) {
-        bom.push(['オプション', slot+'連目付属', getBlockingDiscPN(series,'exh'), 'EXH.ブロッキングディスク']);
+        // EXH: SY3000=SY30M-40-2A×1個 / SY5000・7000=SY□0M-40-1A×2個
+        // （カタログ「EA/EB両側のEXH.をブロックする場合、2ヶ必要になります」）
+        bom.push(['オプション', slot+'連目付属', getBlockingDiscPN(series,'exh'), 'EXH.ブロッキングディスク' + (series !== '3' ? '（2個使用）' : '')]);
+        if (series !== '3') bom.push(['オプション', slot+'連目付属', getBlockingDiscPN(series,'exh'), 'EXH.ブロッキングディスク（2個目）']);
       }
     }
   }
@@ -7785,7 +7852,10 @@ function exportExcel() {
     if (aopt.reducValve && aopt.reducValve.gauge) aggAdd(buildReducValvePN(series, aopt.reducValve), 'スペーサ形減圧弁');
     if (aopt.backpressAssy) aggAdd(getBackpressAssyPN(series), "背圧防止弁Ass'y");
     if (aopt.blockingDiscSup) aggAdd(getBlockingDiscPN(series,'sup'), 'SUPブロッキングディスク');
-    if (aopt.blockingDiscExh) aggAdd(getBlockingDiscPN(series,'exh'), 'EXHブロッキングディスク');
+    if (aopt.blockingDiscExh) {
+      aggAdd(getBlockingDiscPN(series,'exh'), 'EXHブロッキングディスク');
+      if (series !== '3') aggAdd(getBlockingDiscPN(series,'exh'), 'EXHブロッキングディスク'); // 5000/7000は同品番2個
+    }
   }
   if (S.wiring === 'ex600' && S.ex600IoUnits) {
     S.ex600IoUnits.forEach(function(iopn){ aggAdd(iopn, 'EX600 I/Oユニット'); });
@@ -8257,7 +8327,10 @@ function buildOrderItems() {
     if (opt.reducValve && opt.reducValve.gauge) add(buildReducValvePN(series, opt.reducValve), 'スペーサ形減圧弁');
     if (opt.backpressAssy) add(getBackpressAssyPN(series), "背圧防止弁Ass'y");
     if (opt.blockingDiscSup) add(getBlockingDiscPN(series, 'sup'), 'SUPブロッキングディスク');
-    if (opt.blockingDiscExh) add(getBlockingDiscPN(series, 'exh'), 'EXHブロッキングディスク');
+    if (opt.blockingDiscExh) {
+      add(getBlockingDiscPN(series, 'exh'), 'EXHブロッキングディスク');
+      if (series !== '3') add(getBlockingDiscPN(series, 'exh'), 'EXHブロッキングディスク'); // 5000/7000は同品番2個
+    }
   }
   if (S.wiring === 'ex600' && S.ex600IoUnits) {
     S.ex600IoUnits.forEach(function(iopn){ add(iopn, 'EX600 I/Oユニット'); });
