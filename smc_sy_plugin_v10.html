@@ -6252,6 +6252,7 @@ function parseManifoldPN(raw) {
   S.valveTypes = S.valveTypes.slice(0, cnt);
   if (S.valveSpecs) S.valveSpecs = S.valveSpecs.slice(0, cnt);
   var vv = document.getElementById('valve-val'); if (vv) vv.textContent = cnt;
+  var sv6 = document.getElementById('sv6'); if (sv6) sv6.textContent = cnt + '連';  // ステップ6の表示値も更新
   markStep(6, 'done');
 
   var rest = m[5] || '';
@@ -6380,6 +6381,7 @@ function applyValveCsv(text) {
   S.valveTypes = S.valveTypes.slice(0, n);
   if (S.valveSpecs) S.valveSpecs = S.valveSpecs.slice(0, n);
   var vv = document.getElementById('valve-val'); if (vv) vv.textContent = n;
+  var sv6n = document.getElementById('sv6'); if (sv6n) sv6n.textContent = n + '連';  // ステップ6の表示値も更新
   markStep(6, 'done');
   for (var i = 0; i < n; i++) {
     var line = lines[i] || '';
@@ -6508,6 +6510,8 @@ function closeReversePNModal() {
   if (mdl) mdl.style.display = 'none';
 }
 function runReversePN() {
+  // 逆引きで構成を復元したら初回オンボーディングの吹き出しは役目を終える
+  if (typeof window.__dismissOnboarding === 'function') window.__dismissOnboarding();
   var mpn = document.getElementById('rev-manifold-input').value;
   var gvals = _revGridValues();
   while (gvals.length && !gvals[gvals.length - 1].trim()) gvals.pop();
@@ -8436,17 +8440,32 @@ async function fillOfficialSpecForm(file) {
     var filledPnBoxes = 0;
     if (pnRowRef) {
       var pnRow = rowNum(pnRowRef);
-      var typeCellRef = keys.find(function(r){ return rowNum(r) === pnRow && cells[r] === tm[2]; })
-                     || keys.find(function(r){ return rowNum(r) === pnRow && String(cells[r]).indexOf(tm[2]) === 0 && r !== pnRowRef; });
-      var typeCol = typeCellRef ? _colToNum(colOf(typeCellRef)) : _colToNum(colOf(pnRowRef));
-      var dashCols = keys.filter(function(r){ return rowNum(r) === pnRow && cells[r] === '―' && _colToNum(colOf(r)) > typeCol; })
-        .map(function(r){ return _colToNum(colOf(r)); }).sort(function(a,b){ return a-b; });
+      var pnCol = _colToNum(colOf(pnRowRef));
       var endCol = keys.filter(function(r){ return rowNum(r) === pnRow && (cells[r] === '⇒' || String(cells[r]).indexOf('右頁') >= 0); })
         .map(function(r){ return _colToNum(colOf(r)); }).sort(function(a,b){ return a-b; })[0] || 9999;
-      var boxes = merges.filter(function(g){
+      // 型式行の記入ボックス（値なしの結合セル）を左から
+      var allBoxes = merges.filter(function(g){
         return g.r1 === pnRow && g.r2 === pnRow && !cells[g.c1 + pnRow]
-          && _colToNum(g.c1) > typeCol && _colToNum(g.c1) < endCol;
+          && _colToNum(g.c1) > pnCol && _colToNum(g.c1) < endCol;
       }).map(function(g){ return { col: g.c1, n: _colToNum(g.c1) }; }).sort(function(a,b){ return a.n-b.n; });
+      // 固定表記 = SS5Y□ の後、最初の記入ボックスまでの値入りセル（「―」を除く）
+      // ※タイトルの型式コード(tm[2])はボックスの固定表記と一致しないことがある
+      //   （例: タイトル「SS5Y5-10F/FW」→ tm[2]='10F' だがボックス側は '10' のみ）
+      //   一致を前提にすると基準列がSS5Y□まで後退し、その手前の「―」を区切りと誤認して
+      //   グループが1つずれる（連数がコネクタ種類の枠に入る等）ため、実セルから求める。
+      var firstBoxN = allBoxes.length ? allBoxes[0].n : endCol;
+      var fixedCells = keys.filter(function(r){
+        var n = _colToNum(colOf(r));
+        return rowNum(r) === pnRow && n > pnCol && n < firstBoxN && cells[r] !== '―';
+      }).map(function(r){ return { n: _colToNum(colOf(r)), v: String(cells[r]) }; })
+        .sort(function(a,b){ return a.n-b.n; });
+      var typeCol = fixedCells.length ? fixedCells[fixedCells.length-1].n : pnCol;
+      // 混合取付など固定表記が複数セルに分かれる場合（例 'Ｍ'+'10M'）は連結し全角→半角に正規化
+      var fixedText = fixedCells.map(function(c){ return c.v; }).join('')
+        .replace(/[Ａ-Ｚ０-９]/g, function(ch){ return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0); });
+      var dashCols = keys.filter(function(r){ return rowNum(r) === pnRow && cells[r] === '―' && _colToNum(colOf(r)) > typeCol; })
+        .map(function(r){ return _colToNum(colOf(r)); }).sort(function(a,b){ return a-b; });
+      var boxes = allBoxes.filter(function(b){ return b.n > typeCol; });
       // グループ分割: type直後〜次の―, ―〜―, 最後の―〜⇒
       function groupOf(bn) {
         var gi = 0;
@@ -8455,11 +8474,15 @@ async function fillOfficialSpecForm(file) {
       }
       var groups = [[], [], []];
       boxes.forEach(function(b){ var gi = Math.min(groupOf(b.n), 2); groups[gi].push(b); });
-      // 値: G0=型式残り記号（SI/極性/I-O連数等）, G1=連数+P,E, G2=口径+ねじ+取付
-      var typeRest = typeCode.slice(tm[2].length);
+      // 値: G0=型式残り記号（配線方式・SI/極性・I-O連数等）, G1=連数+P,E, G2=口径+ねじ+取付
+      // 残り記号は「ボックスの固定表記」を基準に切り出す（tm[2]基準だと配線方式記号を取りこぼす）
+      var typeRest = (fixedText && typeCode.indexOf(fixedText) === 0)
+        ? typeCode.slice(fixedText.length)
+        : typeCode.slice(tm[2].length);
       var restTokens = [];
       var trWork = typeRest;
-      var SI_TOKENS = ['EP','EB','DA','FA','FB','WS','FW','FC','PG','PH','PC','TC','AAN','ABN','ACN'];
+      var SI_TOKENS = ['EP','EB','DA','FA','FB','WS','FW','FC','PG','PH','PC','TC','AAN','ABN','ACN',
+                       'L1','L2','L3','SW','M12'];
       while (trWork.length) {
         var tok = SI_TOKENS.find(function(t2){ return trWork.indexOf(t2) === 0; }) || trWork.charAt(0);
         restTokens.push(tok); trWork = trWork.slice(tok.length);
@@ -8644,6 +8667,7 @@ async function fillOfficialSpecForm(file) {
     box.parentNode.insertBefore(b, box.nextSibling);
     var t=setTimeout(done,15000);
     function done(){clearTimeout(t);try{localStorage.setItem(KEY,'1');}catch(e){}box.classList.remove('ktb-glow');if(b.parentNode)b.parentNode.removeChild(b);}
+    window.__dismissOnboarding=done;   // 品番逆引きで構成を復元したときも解除する
     box.addEventListener('click',done,{once:true});
     b.querySelector('button').addEventListener('click',function(e){e.stopPropagation();done();});
   }
