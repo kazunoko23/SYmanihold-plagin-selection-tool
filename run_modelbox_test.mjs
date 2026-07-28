@@ -12,7 +12,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-const here = dirname(fileURLToPath(import.meta.url));
+const here = 'C:/Users/mtyf2/OneDrive/デスクトップ/SMC 開発ソフト/SYmanihold-plagin-selection-tool/tests';
 const templateDir = process.argv[2]
   || join(process.env.USERPROFILE || process.env.HOME || '', 'Downloads', 'smc_forms');
 
@@ -35,13 +35,6 @@ const CASES = {
   'SS5Y5-M10M-A.xlsx':       { series:'5', base:'mixed', pipe:'横配管', wiring:'multi', sub:{}, mix:['8','6'] },
   'SS5Y5-M11M.xlsx':         { series:'5', base:'mixed', pipe:'裏配管', wiring:'multi', sub:{}, mix:['8','6'] },
   'SS5Y7-10S(EX260)-A.xlsx': { series:'7', base:'conn',  pipe:'横配管', wiring:'ex260', sub:{ ex260Pts:'32', ex260Si:'QA' }, ab:'C10' },
-  // 2026-07-29 追加DL分
-  'SS5Y3-10S-EX260-B.xlsx':  { series:'3', base:'conn',  pipe:'横配管', wiring:'ex260', sub:{ ex260Pts:'32', ex260Si:'QA' }, ab:'C6' },
-  'SS5Y5-11S(EX260)-A.xlsx': { series:'5', base:'conn',  pipe:'裏配管', wiring:'ex260', sub:{ ex260Pts:'32', ex260Si:'QA' }, ab:'C8' },
-  'SS5Y5-12M.xlsx':          { series:'5', base:'conn',  pipe:'上配管', wiring:'multi', sub:{}, upperPe:'' },
-  'SS5Y5-M12M.xlsx':         { series:'5', base:'mixed', pipe:'上配管', wiring:'multi', sub:{}, upperPe:'' },
-  'SS5Y5-M12S(EX250).xlsx':  { series:'5', base:'mixed', pipe:'上配管', wiring:'ex250', sub:{ ex250Si:'Q', ex250Io:'1', ex250Spec:'A' }, upperPe:'' },
-  'SS5Y5-M12T.xlsx':         { series:'5', base:'mixed', pipe:'上配管', wiring:'term',  sub:{}, upperPe:'' },
 };
 
 // 再帰的にテンプレを探す

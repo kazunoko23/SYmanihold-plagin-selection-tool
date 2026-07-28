@@ -5169,6 +5169,23 @@ function buildPN() {
     }
   }
 
+  // 上配管形・口径混合(CM/LM)はバルブ品番側にA,Bポート口径が必要（未設定だと SY5130-51--- のような
+  // プレースホルダ品番になり手配できない）→ 全バルブ分の設定を確定条件に含める
+  if (S.pipe === '上配管' || S.abCode === 'CM' || S.abCode === 'LM') {
+    for (var pvi = 0; pvi < (S.valveCount || 0); pvi++) {
+      var pvt = S.valveTypes[pvi] || 'single';
+      if (pvt === 'blank') continue;
+      var pvs = (S.valveSpecs && S.valveSpecs[pvi]) || null;
+      if (pvs && pvs.manifoldOpt && pvs.manifoldOpt.slot) continue;  // スロット占有はバルブなし
+      if (pvs && pvs.special) continue;                              // 特殊バルブは口径固定
+      if (!pvs || !pvs.portSize) {
+        complete = false;
+        notes.push('⚠ ' + (pvi + 1) + '連目のA,Bポート口径が未設定です（バルブ編集パネルで連別に設定してください）');
+        break;
+      }
+    }
+  }
+
   return { full, complete, notes, segs };
 }
 
@@ -6295,7 +6312,8 @@ function parseManifoldPN(raw) {
     if (!um) return { ok: false, error: '連数以降を解釈できません: ' + rest };
     var epErr = applyEport(um[1]);
     if (epErr) return { ok: false, error: epErr };
-    if (base === 'conn' && typeof setConnUpperPePort === 'function') setConnUpperPePort(um[2] || '');
+    // P,Eポート口径（無記号=ミリ/N=インチ）は金属ベース以外の上配管で使用（混合M12型も含む）
+    if (base !== 'metal' && typeof setConnUpperPePort === 'function') setConnUpperPePort(um[2] || '');
     applyMount(um[3] || '');
     notes.push('上配管形: A,Bポート口径は各バルブ品番側で確認してください');
   } else {
@@ -6653,6 +6671,17 @@ function getMissingItems() {
     if (!S.abCode || S.abCode === '__per_valve__') add('A,Bポート口径', 8);
   }
   if (S.series && S.base && S.pipe && getMountCode() === null) add('取付方法', 9);
+  // 上配管形・口径混合(CM/LM)はバルブ連別のA,Bポート口径が必要
+  if (S.pipe === '上配管' || S.abCode === 'CM' || S.abCode === 'LM') {
+    for (var mvi = 0; mvi < (S.valveCount || 0); mvi++) {
+      var mvt = S.valveTypes[mvi] || 'single';
+      if (mvt === 'blank') continue;
+      var mvs = (S.valveSpecs && S.valveSpecs[mvi]) || null;
+      if (mvs && mvs.manifoldOpt && mvs.manifoldOpt.slot) continue;
+      if (mvs && mvs.special) continue;
+      if (!mvs || !mvs.portSize) { add('バルブ連別のA,Bポート口径（バルブ編集で設定）', 8); break; }
+    }
+  }
   return items;
 }
 
@@ -8399,6 +8428,12 @@ async function fillOfficialSpecForm(file) {
     if (!file) return;
     var res = buildPN();
     if (!res) { _ofmStatus('先に選定を進めてください（品番が生成されていません）', false); alert('先に選定を進めてください（品番が生成されていません）'); return; }
+    // 選定未完了のまま記入すると「--」「□」等のプレースホルダ品番が仕様書に残るため確認を挟む
+    if (!res.complete) {
+      var missTxt = (typeof getMissingItems === 'function')
+        ? getMissingItems().map(function(m){ return '・' + (m.label || m); }).join('\n') : '';
+      if (!confirm('選定が未完了です。このまま記入すると未確定の項目が空欄・仮表記になります。' + '\n\n' + missTxt + '\n\n' + 'それでも記入しますか？')) return;
+    }
     _ofmStatus('「' + file.name + '」を解析・記入中…', null);
 
     var buf = new Uint8Array(await file.arrayBuffer());
@@ -8412,6 +8447,19 @@ async function fillOfficialSpecForm(file) {
     var keys = Object.keys(cells);
     function rowNum(ref){ return parseInt(ref.match(/\d+$/)[0], 10); }
     function colOf(ref){ return ref.match(/^[A-Z]+/)[0]; }
+
+    // ── 派生シリーズ専用テンプレの検出（25A-=二次電池対応 等）──
+    // タイトルは標準SS5Y□-□□と同文のため型式コードでは区別できず、型式ボックス行の
+    // 先頭に「25A-」セルが置かれているのが唯一の識別点。本ツールは標準SYのみ対応。
+    var is25A = /(^|[^0-9A-Z])25A-/.test(String(file.name || '')) ||
+      keys.some(function(r){ var v = String(cells[r]).trim(); return v === '25A-' || v.indexOf('25A-SS5Y') === 0; });
+    if (is25A) {
+      _ofmStatus('✗ 25A-（二次電池対応）仕様書は対象外です（本ツールは標準SYのみ対応）', false);
+      alert('このテンプレートは 25A-（二次電池対応）シリーズ専用の仕様書です。\n'
+        + '本ツールは標準SYシリーズのみ対応のため記入できません。\n'
+        + '（25A-品は銅・亜鉛フリー仕様で品番も 25A- プレフィックス付きの別製品です）');
+      return;
+    }
 
     // ── テンプレート検出・整合チェック ──
     var title = '';
@@ -8525,6 +8573,17 @@ async function fillOfficialSpecForm(file) {
     }).map(function(r){ return { col: colOf(r), n: parseInt(cells[r], 10) }; }).sort(function(a,b){ return a.n-b.n; });
 
     var rI = rowOfLabel('切換方式');
+    // 混載（M型）テンプレは切換方式がSY3000行/SY5000行（またはSY5000/SY7000行）の2段。
+    // ツールの混載モデルは連別シリーズを持たず生成バルブ品番は選択シリーズ側のため、
+    // 選択シリーズ（SY□000）のラベルが付いた行に記入する
+    if (rI) {
+      var serLbl = 'SY' + S.series + '000';
+      var serRows = keys.filter(function(r){
+        var rn = rowNum(r);
+        return rn >= rI && rn <= rI + 2 && String(cells[r]).trim() === serLbl;
+      }).map(rowNum).sort(function(a,b){ return a-b; });
+      if (serRows.length) rI = serRows[0];
+    }
     var rJ = rowOfLabel('シール方式');
     var rK = rowOfLabel('パイロット仕様');
     var rL = rowOfLabel('背圧防止弁（バルブ内蔵');
