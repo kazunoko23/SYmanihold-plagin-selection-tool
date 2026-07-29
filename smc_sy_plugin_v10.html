@@ -8535,22 +8535,47 @@ async function fillOfficialSpecForm(file) {
         var tok = SI_TOKENS.find(function(t2){ return trWork.indexOf(t2) === 0; }) || trWork.charAt(0);
         restTokens.push(tok); trWork = trWork.slice(tok.length);
       }
-      function fillGroup(gBoxes, vals) {
-        for (var gi2 = 0; gi2 < gBoxes.length; gi2++) {
-          if (gi2 < vals.length) {
-            var v2 = (gi2 === gBoxes.length - 1) ? vals.slice(gi2).join('') : vals[gi2];
-            if (v2) { W(gBoxes[gi2].col + pnRow, v2); filledPnBoxes++; }
+      // 型式行の「印字済みセル」も考慮する。金属ベース等のテンプレは枠の間に固定記号が
+      // 挟まる（例 50 [外部パイロットR枠] P [方向枠] ― … / 51型はP,E取出Dが印字済み）ため、
+      // 印字済みセルが担う値は書き込まず、その前の枠も空けておく。
+      var inlineTexts = keys.filter(function(r){
+        var n = _colToNum(colOf(r));
+        return rowNum(r) === pnRow && n > typeCol && n < endCol && cells[r] !== '―'
+          && String(cells[r]).trim().length <= 6;
+      }).map(function(r){
+        return { n: _colToNum(colOf(r)),
+                 v: String(cells[r]).trim().replace(/[Ａ-Ｚ０-９]/g, function(ch){ return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0); }) };
+      });
+      var tGroups = [[], [], []];
+      inlineTexts.forEach(function(t){ var gi = Math.min(groupOf(t.n), 2); tGroups[gi].push(t); });
+      function fillGroup(gBoxes, vals, gTexts) {
+        vals = (vals || []).filter(function(v){ return v !== '' && v !== null && v !== undefined; });
+        var items = gBoxes.map(function(b){ return { box: true, n: b.n, col: b.col }; })
+          .concat((gTexts || []).map(function(t){ return { box: false, n: t.n, v: t.v }; }))
+          .sort(function(a, b){ return a.n - b.n; });
+        for (var ii = 0; ii < items.length && vals.length; ii++) {
+          var it = items[ii];
+          if (!it.box) {
+            if (it.v === vals[0]) vals.shift();   // 印字済みセルが値を担う
+            continue;
           }
+          // この枠の後に、次の値と同じ印字セルが控えていれば書かない（印字に任せる）
+          var futureText = items.slice(ii + 1).some(function(x){ return !x.box && x.v === vals[0]; });
+          if (futureText) continue;
+          var isLastBox = !items.slice(ii + 1).some(function(x){ return x.box; });
+          var v2 = isLastBox ? vals.join('') : vals.shift();
+          if (isLastBox) vals = [];
+          if (v2) { W(it.col + pnRow, v2); filledPnBoxes++; }
         }
       }
-      fillGroup(groups[0], restTokens);
+      fillGroup(groups[0], restTokens, tGroups[0]);
       // 連数+P,E＝品番の第3セグメント（SS5Y3-10S6Q72-[05B]-C6）
       var cntSeg = (res.full.split('-')[2] || '').match(/^(\d{2})([A-Z]*)$/) || [];
-      fillGroup(groups[1], [cntSeg[1] || String(S.valveCount).padStart(2,'0'), cntSeg[2] || '']);
+      fillGroup(groups[1], [cntSeg[1] || String(S.valveCount).padStart(2,'0'), cntSeg[2] || ''], tGroups[1]);
       var tail = res.full.split('-').slice(3).join('-');
       var abPart = (S.pipe !== '上配管') ? (S.abCode || '') : '';
       var mountPart = tail.indexOf(abPart) === 0 ? tail.slice(abPart.length) : (getMountCode() || '');
-      fillGroup(groups[2], [abPart, mountPart]);
+      fillGroup(groups[2], [abPart, mountPart], tGroups[2]);
     }
 
     // ── アンカー行の特定 ──

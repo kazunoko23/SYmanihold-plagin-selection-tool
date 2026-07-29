@@ -42,6 +42,13 @@ const CASES = {
   'SS5Y5-M12M.xlsx':         { series:'5', base:'mixed', pipe:'上配管', wiring:'multi', sub:{}, upperPe:'' },
   'SS5Y5-M12S(EX250).xlsx':  { series:'5', base:'mixed', pipe:'上配管', wiring:'ex250', sub:{ ex250Si:'Q', ex250Io:'1', ex250Spec:'A' }, upperPe:'' },
   'SS5Y5-M12T.xlsx':         { series:'5', base:'mixed', pipe:'上配管', wiring:'term',  sub:{}, upperPe:'' },
+  // 2026-07-29 金属ベース50/51/52型（型式ボックスに印字済みセルが挟まる構造）
+  'SS5Y3-50P-A.xlsx':        { series:'3', base:'metal', pipe:'横配管', wiring:'flat', sub:{ connType:'P',  connDir:'2', metalFlatS:'S' }, ab:'C6' },
+  'SS5Y5-50PH-A.xlsx':       { series:'5', base:'metal', pipe:'横配管', wiring:'flat', sub:{ connType:'PH', connDir:'1', metalFlatS:'' }, ab:'C8' },
+  'SS5Y3-51P-A.xlsx':        { series:'3', base:'metal', pipe:'裏配管', wiring:'flat', sub:{ connType:'P',  connDir:'2', metalFlatS:'S' }, ab:'C6' },
+  'SS5Y5-51P-A.xlsx':        { series:'5', base:'metal', pipe:'裏配管', wiring:'flat', sub:{ connType:'P',  connDir:'2', metalFlatS:'' }, ab:'C8' },
+  'SS5Y3-52PH-A.xlsx':       { series:'3', base:'metal', pipe:'上配管', wiring:'flat', sub:{ connType:'PH', connDir:'1', metalFlatS:'S' } },
+  'SS5Y5-52F-A.xlsx':        { series:'5', base:'metal', pipe:'上配管', wiring:'dsub', sub:{ connType:'F',  connDir:'2', metalFlatS:'' } },
 };
 
 // 再帰的にテンプレを探す
@@ -90,6 +97,7 @@ for (const { name, path } of found) {
     setSeries(c.series); setBase(c.base); setPipe(c.pipe); setWiring(c.wiring);
     const s = c.sub || {};
     if (s.connType) { setConnType(s.connType); setConnDir(s.connDir || '1'); }
+    if (s.metalFlatS !== undefined && typeof setMetalFlatS === 'function') setMetalFlatS(s.metalFlatS);
     if (s.leadNum)  { setLeadNum(s.leadNum); setLeadLen(s.leadLen); }
     if (s.ex600Si)  { setEx600Si(s.ex600Si); if (s.ex600IoPolar) setEx600IoPolar(s.ex600IoPolar); if (s.ex600Io) setEx600Io(s.ex600Io); }
     if (s.ex250Si)  { setEx250Si(s.ex250Si); setEx250Io(s.ex250Io); setEx250Spec(s.ex250Spec); }
