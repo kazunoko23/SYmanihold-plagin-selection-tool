@@ -1,4 +1,4 @@
-// カタログ手配例テスト — smc_sy_plugin_v10.html の buildPN()/getValvePN() を
+// カタログ手配例テスト — smc_sy_plugin_v11.html の buildPN()/getValvePN() を
 // SMC SYカタログ（7-1-2-p0387-0722）に実在する手配例品番と突合する。
 // 実行: node tests/test_catalog_examples.mjs
 import { readFileSync } from 'fs';
@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const html = readFileSync(join(here, '..', 'smc_sy_plugin_v10.html'), 'utf8');
+const html = readFileSync(join(here, '..', 'smc_sy_plugin_v11.html'), 'utf8');
 
 // 最後の<script>ブロック＝アプリ本体（先頭側はXLSXライブラリ）
 const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);

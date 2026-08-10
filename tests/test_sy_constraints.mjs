@@ -2,12 +2,13 @@
 // カタログ制約が、ツール側で強制されていることを検証する。
 // 根拠: SY総合カタログ（EX600 / CIP Safety / EX245 / EX250 各型式表示方法ページ）
 // 実行: node tests/test_sy_constraints.mjs
-import { readFileSync } from 'fs';
+import fs, { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const html = readFileSync(join(here, '..', 'smc_sy_plugin_v10.html'), 'utf8');
+const html = readFileSync(join(here, '..', 'smc_sy_plugin_v11.html'), 'utf8');
+const HTML_PATH_FOR_DISCON_TEST = join(here, '..', 'smc_sy_plugin_v11.html');
 // scriptブロックが増えても壊れないよう buildPN を含むブロックを探す
 const blocks = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 const appJs = blocks.find(b => /function buildPN/.test(b));
@@ -142,6 +143,35 @@ ck('SY3000 EXH（専用品）', getBlockingDiscPN('3', 'exh'), 'SY30M-40-2A');
 ck('SY5000 SUP', getBlockingDiscPN('5', 'sup'), 'SY50M-40-1A');
 ck('SY5000 EXH（SUPと同一・2個使用）', getBlockingDiscPN('5', 'exh'), 'SY50M-40-1A');
 ck('SY7000 EXH（SUPと同一・2個使用）', getBlockingDiscPN('7', 'exh'), 'SY70M-40-1A');
+
+console.log('════ 生産終了品の告知（監査 2026-08-10） ════');
+// 根拠: EX600-W 旧カタログ（生産終了品ページ EX600-W-2-old.pdf）の手配例
+//   「SS5Y3-10S6WS72-05B-C6（10型5連マニホールドベース、リモート）… EX600-WSV1」
+//   → マニホールド型式記号 WS の実体は EX600-WSV1/WSV2。
+//   公式生産終了情報: EX600-WSV1/WSV2 は2026年8月終了（→EXW1-RD##E#/G#・RAX#・RDY#M5C／取付互換なし）、
+//   無線ベース EX600-WEN1/WEN2/WPN1/WPN2 は2025年3月終了（→EXW1-BENAC1/BPNAC1）。
+{
+  const src = fs.readFileSync(HTML_PATH_FOR_DISCON_TEST, 'utf8');
+  ck('EX600 WS のプロトコル表に生産終了を明記',
+     /無線リモート（EX600-WSV1\/2）/.test(src) && /2026年8月生産終了/.test(src), true);
+  ck('EX600 WS のSIユニット選択行に終了バッジ',
+     /⚠ 生産終了品（EX600-WSV1\/2・2026年8月）/.test(src), true);
+  ck('EX600 WS 選択時に品番の注記で警告',
+     /EX600-WSV1\/WSV2 は2026年8月生産終了です/.test(src), true);
+  ck('後継 EXW1（小型無線リモート）へ誘導している',
+     /小型無線リモート EXW1/.test(src), true);
+  // 生産終了記号を「無警告で」出していないことの負例: WS を選ぶと必ず警告noteが付く
+  base('ex600'); S.ex600Si = 'WS'; S.ex600IoPolar = 'minus'; S.ex600Io = '4';
+  const r = buildPN();
+  ck('WS選択時のnotesに生産終了警告が入る',
+     (r.notes || []).some(function(n){ return /2026年8月生産終了/.test(String(n)); }), true);
+  ck('WS選択時の品番自体は従来どおり生成される', r.full.indexOf('SS5Y3-10S6WS') === 0, true);
+  // 現行の小型無線リモート（EXW1）は警告なしで通ること
+  base('wireless'); S.wirelessType = 'W2';
+  const r2 = buildPN();
+  ck('小型無線リモート(EXW1)には終了警告が付かない',
+     (r2.notes || []).every(function(n){ return !/生産終了/.test(String(n)); }), true);
+}
 
 console.log('──────────────────────────────');
 console.log(`結果: ${pass} passed / ${fail} failed`);
