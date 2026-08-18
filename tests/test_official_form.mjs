@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const html = readFileSync(join(here, '..', 'smc_sy_plugin_v11.html'), 'utf8');
+const html = readFileSync(join(here, '..', 'smc_sy_plugin_v12.html'), 'utf8');
 const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 const appJs = blocks.find(b => b.includes("function buildPN")); // アプリ本体（XLSXライブラリ・オンボーディング等を除外）
 

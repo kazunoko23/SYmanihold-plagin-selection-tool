@@ -7,8 +7,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const html = readFileSync(join(here, '..', 'smc_sy_plugin_v11.html'), 'utf8');
-const HTML_PATH_FOR_DISCON_TEST = join(here, '..', 'smc_sy_plugin_v11.html');
+const html = readFileSync(join(here, '..', 'smc_sy_plugin_v12.html'), 'utf8');
+const HTML_PATH_FOR_DISCON_TEST = join(here, '..', 'smc_sy_plugin_v12.html');
 // scriptブロックが増えても壊れないよう buildPN を含むブロックを探す
 const blocks = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 const appJs = blocks.find(b => /function buildPN/.test(b));
@@ -52,11 +52,12 @@ new Function(
   appJs + `
 ;__ex.S=S; __ex.buildPN=buildPN; __ex.sanitizeAllValves=sanitizeAllValves;
  __ex.updateMountOptions=updateMountOptions; __ex.getBlockingDiscPN=getBlockingDiscPN;
- __ex.getEx250MaxInputBlocks=getEx250MaxInputBlocks;`
+ __ex.getEx250MaxInputBlocks=getEx250MaxInputBlocks;
+ __ex.getValvePN=getValvePN; __ex.backpressAllowed=backpressAllowed;`
 )(globalThis.document, globalThis.window, globalThis.alert, globalThis.localStorage,
   globalThis.navigator, globalThis.XLSX, globalThis.FileReader, globalThis.Blob, globalThis.URL, ex);
 
-const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks } = ex;
+const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed } = ex;
 const S0 = JSON.parse(JSON.stringify(S));
 
 let pass = 0, fail = 0;
@@ -174,5 +175,36 @@ console.log('════ 生産終了品の告知（監査 2026-08-10） ══
 }
 
 console.log('──────────────────────────────');
+
+/* v12: 2026-08-17 くうあつーる横断監査（品番確認）で確定した制約 */
+{
+  const setValve = (series, pipe, spec) => {
+    Object.assign(S, { series, base:'conn', pipe, wiring:'dsub', valveCount:1, valveTypes:[spec.type||'single'] });
+    S.valveSpecs = [Object.assign({ type:'single', seal:'0', pilot:'0', backpress:'', pilotOpt:'', coil:'',
+      voltage:'5', lamp:'U', manual:'', screw:'', portSize:'', portScrew:'', special:'', vacBport:'' }, spec)];
+  };
+  // 残圧排気弁付は「-E」
+  setValve('5','横配管',{ type:'3cs', special:'residual' });
+  ck('v12 残圧排気弁付は -E（ハイフン必須）', /-5U1-E$/.test(getValvePN(0)), true);
+  // 背圧防止弁H: SY7000不可・3位置不可・メタル不可
+  ck('v12 H: SY3000 2位置は可', backpressAllowed('3',{seal:'0',type:'double'}), true);
+  ck('v12 H: SY5000 2位置は可', backpressAllowed('5',{seal:'0',type:'single'}), true);
+  ck('v12 H: SY7000は不可', backpressAllowed('7',{seal:'0',type:'double'}), false);
+  ck('v12 H: 3位置クローズドは不可', backpressAllowed('5',{seal:'0',type:'3cs'}), false);
+  ck('v12 H: 3位置排気/プレッシャも不可', backpressAllowed('5',{seal:'0',type:'3es'}) || backpressAllowed('5',{seal:'0',type:'3ps'}), false);
+  ck('v12 H: メタルシールは不可', backpressAllowed('5',{seal:'1',type:'single'}), false);
+  // 絞り弁付真空切換弁: 上配管形かつSY3000/5000のみ
+  setValve('5','上配管',{ special:'vacuum' });
+  ck('v12 真空: SY5000上配管は品番が出る', /^SY5A3R/.test(getValvePN(0)), true);
+  setValve('7','上配管',{ special:'vacuum' });
+  ck('v12 真空: SY7000は警告', /⚠/.test(getValvePN(0)), true);
+  setValve('5','横配管',{ special:'vacuum' });
+  ck('v12 真空: 横配管形は警告', /⚠/.test(getValvePN(0)), true);
+  // sanitize が成立しない組合せを落とす
+  setValve('7','横配管',{ type:'3cs', backpress:'H' });
+  sanitizeAllValves();
+  ck('v12 sanitize: 成立しないHを落とす', (S.valveSpecs[0].backpress||''), '');
+}
+
 console.log(`結果: ${pass} passed / ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1,4 +1,4 @@
-// カタログ手配例テスト — smc_sy_plugin_v11.html の buildPN()/getValvePN() を
+// カタログ手配例テスト — smc_sy_plugin_v12.html の buildPN()/getValvePN() を
 // SMC SYカタログ（7-1-2-p0387-0722）に実在する手配例品番と突合する。
 // 実行: node tests/test_catalog_examples.mjs
 import { readFileSync } from 'fs';
@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const html = readFileSync(join(here, '..', 'smc_sy_plugin_v11.html'), 'utf8');
+const html = readFileSync(join(here, '..', 'smc_sy_plugin_v12.html'), 'utf8');
 
 // 最後の<script>ブロック＝アプリ本体（先頭側はXLSXライブラリ）
 const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
@@ -205,7 +205,9 @@ const valveCases = [
     Object.assign(S, { series:'5', base:'conn', pipe:'横配管', wiring:'dsub', valveCount:1, valveTypes:['single'] });
     S.valveSpecs = [{ type:'single', seal:'0', pilot:'0', backpress:'', pilotOpt:'', coil:'', voltage:'5', lamp:'U', manual:'', screw:'', portSize:'', portScrew:'', special:'pressure', vacBport:'', sensorCount:'2' }];
   }],
-  ['SY5300-5U1E', () => { // 残圧排気弁付（3位置クローズドセンタ）
+  // v12: カタログの図では記号Eが直結して見えるが、品番確認では SY5300-5U1E=NG／SY5300-5U1-E=OK
+  //（2026-08-17 実証。SY7300-5U1-E・SY5300B-5UD1-E も OK）。ハイフン付きが正。
+  ['SY5300-5U1-E', () => { // 残圧排気弁付（3位置クローズドセンタ）
     Object.assign(S, { series:'5', base:'conn', pipe:'横配管', wiring:'dsub', valveCount:1, valveTypes:['3cs'] });
     S.valveSpecs = [{ type:'3cs', seal:'0', pilot:'0', backpress:'', pilotOpt:'', coil:'', voltage:'5', lamp:'U', manual:'', screw:'', portSize:'', portScrew:'', special:'residual', vacBport:'', sensorCount:'1' }];
   }],

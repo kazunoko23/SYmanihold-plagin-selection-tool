@@ -75,7 +75,7 @@ catch { console.log('SKIP: playwright-core が未導入です（npm i playwright
 const CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 if (!existsSync(CHROME)) { console.log('SKIP: Chromeが見つかりません → ' + CHROME); process.exit(0); }
 
-const url = 'file:///' + join(here, '..', 'smc_sy_plugin_v11.html').replace(/\\/g, '/').replace(/ /g, '%20').replace(/[^\x00-\x7F]/g, c => encodeURIComponent(c));
+const url = 'file:///' + join(here, '..', 'smc_sy_plugin_v12.html').replace(/\\/g, '/').replace(/ /g, '%20').replace(/[^\x00-\x7F]/g, c => encodeURIComponent(c));
 const browser = await chromium.launch({ executablePath: CHROME, headless: true });
 const page = await (await browser.newContext()).newPage();
 const errs = [];
