@@ -1215,10 +1215,9 @@ function getWiringLimits() {
     return { sol: 32, st: 24 };
   }
   if (w === 'ex245' || w === 'ex600' || w === 'ex500') return { sol: 32, st: 24 };
-  /* v12: 端子台配列指定（TC）の連数上限。実証（2026-08-17 品番確認）:
-     SS5Y3/5/7-10TC-08D・-09D・-10D=OK ／ -12D・-16D・-20D・-24D=NG（3シリーズとも同じ）。
-     v11 は 24 連まで許していたため 11 連以上で無効な品番を出していた。 */
-  if (w === 'term_sp') return { sol: 20, st: 10 };
+  /* 端子台ボックス（スプリング式）TC: ダブル配線 02〜16連／配列指定 02〜24連（ソレノイド32まで）
+     — カタログ p.448「eバルブ連数」。連数の実際の上限は下の P,Eポート取出位置でさらに絞られる。 */
+  if (w === 'term_sp') return { sol: 32, st: 24 };
   if (w === 'term') return { sol: 20, st: 20 };
   if (w === 'lead') {
     if (S.leadNum === '3') return { sol: 8, st: 8 };
@@ -1233,6 +1232,18 @@ function getWiringLimits() {
   }
   if (w === 'dsub') return { sol: 24, st: 24 };
   return { sol: 24, st: 24 };
+}
+
+/* P,Eポート取出位置による連数の上限（配線方式によらない共通制約）。
+   カタログ「r P,Eポート取出位置: U＝U側（2〜10連）／D＝D側（2〜10連）／B＝両側（2〜24連）」。
+   実証（2026-08-21 品番確認）: SS5Y3-10TC-10U-C6・-10D=OK／-12U・-12D=NG／-12B・-16B・-24B=OK。
+   Dサブでも同じ（SS5Y3-10F2-16B-C6=OK／-12D=NG）。
+   v12 は TC だけ一律10連に絞っていたが、両側Bの11〜24連まで塞いでしまう誤りだったので
+   「取出位置で決まる共通の上限」に直した。 */
+function getEportStationMax() {
+  var el = document.getElementById('sel-eport');
+  var pos = el ? el.value : 'U';
+  return (pos === 'B') ? 24 : 10;
 }
 
 // 現在のバルブ構成の消費ソレノイド数（シングル=1点、ダブル/3位置/4位置=2点、ブランク/スロットOP=0点）
@@ -2033,13 +2044,9 @@ function renderConnDetail() {
       <div class="sub-select">
         <div class="sub-lbl">SIユニット仕様（出力点数・出力能力・バルブ最大連数）</div>
         <div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">
-          <div onclick="setEx500Si('EB')" style="border:1.5px solid ${S.ex500Si==='EB'?'var(--blue)':'var(--border)'};border-radius:6px;padding:7px 10px;cursor:pointer;background:${S.ex500Si==='EB'?'#ebf3ff':'#fff'};transition:all .12s;">
-            <div style="font-weight:800;font-size:11px;color:${S.ex500Si==='EB'?'var(--blue)':'var(--text)'};">EB &mdash; マイナスコモン</div>
-            <div style="font-size:8px;color:#94a3b8;">2〜16連（24連）/ 品番確認で実証済み</div>
-          </div>
-          <div onclick="setEx500Si('FA')" style="border:1.5px solid ${S.ex500Si==='FA'?'var(--blue)':'var(--border)'};border-radius:6px;padding:7px 10px;cursor:pointer;background:${S.ex500Si==='FA'?'#ebf3ff':'#fff'};transition:all .12s;">
-            <div style="font-weight:800;font-size:11px;color:${S.ex500Si==='FA'?'var(--blue)':'var(--text)'};">FA &mdash; プラスコモン</div>
-            <div style="font-size:8px;color:#94a3b8;">2〜16連（24連）/ 品番確認で実証済み</div>
+          <div onclick="setEx500Si('0')" style="border:1.5px solid ${S.ex500Si==='0'?'var(--blue)':'var(--border)'};border-radius:6px;padding:7px 10px;cursor:pointer;background:${S.ex500Si==='0'?'#ebf3ff':'#fff'};transition:all .12s;">
+            <div style="font-weight:800;font-size:11px;color:${S.ex500Si==='0'?'var(--blue)':'var(--text)'};">0 &mdash; SIユニットなし</div>
+            <div style="font-size:8px;color:#94a3b8;">取付予定のSIユニットの最大ソレノイド数に注意</div>
           </div>
           <div onclick="setEx500Si('A3N')" style="border:1.5px solid ${S.ex500Si==='A3N'?'var(--blue)':'var(--border)'};border-radius:6px;padding:7px 10px;cursor:pointer;background:${S.ex500Si==='A3N'?'#ebf3ff':'#fff'};transition:all .12s;">
             <div style="font-weight:800;font-size:11px;color:${S.ex500Si==='A3N'?'var(--blue)':'var(--text)'};">A3N — マイナスコモン</div>
@@ -2051,9 +2058,8 @@ function renderConnDetail() {
           <div style="font-size:9px;color:#dc2626;line-height:1.6;">新規設計には <strong>EX260</strong> または <strong>EX600</strong> を推奨します。</div>
         </div>
         <div style="margin-top:5px;font-size:9px;color:#94a3b8;">EX500 ゲートウェイ分散システム2（128点）対応<br>参照: p.486〜487（10/11型）/ p.498〜499（12型）<br>
-          v12: 「無記号（SIユニットなし）」は品番確認で成立しないため外しました（SS5Y3-10S-05D-C6＝NG）。
-          A3N は有効で、カタログのポップアップにあった EB（マイナスコモン）・FA（プラスコモン）も実証済みのため選べるようにしました
-          （SS5Y3-10SA3N-05D-C6 / -10SEB-05D-C6 / -10SFA-05D-C6 ＝いずれもOK）。</div>
+          v12: SIユニットなしの記号は「無記号」ではなく <b>0</b> です（カタログ p.497「eSIユニット仕様: 0＝SIユニットなし／A3N＝32点出力・マイナスコモン」）。
+          実証: SS5Y3-10S0-05D-C6 ＝OK ／ 無記号の SS5Y3-10S-05D-C6 ＝NG。</div>
       </div>`;
     const done = S.ex500Si !== null;
     markStep(5, done ? 'done' : '');
@@ -3543,14 +3549,20 @@ function getValvePN(idx) {
 
   if (spec.special === 'vacuum') {
     if (S.base === 'metal' && S.pipe === '裏配管') return '⚠ 金属ベース51型（裏配管形）には非対応';
-    // 実証（2026-08-16/17 品番確認）: 横配管形（0）は SY3000/5000/7000 とも全てNG（SY3A0R/SY5A0R/SY7A0R）。
-    // 上配管形（3）は SY3000・SY5000 のみOK（SY5A3R-5U1-C6=OK／SY7A3R-5U1-C6=NG）。
-    if (pipe !== '上配管') return '⚠ 絞り弁付真空切換弁は上配管形（12/52型）のみ対応です（横配管形は品番確認で成立しません）';
-    if (series === '7') return '⚠ 絞り弁付真空切換弁はSY3000/SY5000のみ対応です（SY7000は品番確認で成立しません）';
-    var pcode = '3';
+    /* 絞り弁付真空破壊バルブ（カタログ p.415 型式表示方法）。
+       ❸ポート配管方向: 0＝横配管形／裏配管形（ポートはマニホールド側）、3＝上配管形（ポートはバルブ側）。
+       **横配管形はバルブ品番に口径記号を付けない**（カタログ手配例 `SY3A0R-5U1`）。上配管形は付ける（`SY3A3R-5U1-C6`）。
+       対応シリーズは SY3000/5000 のみ（p.404 の一覧 注4）。
+       実証（2026-08-21 品番確認）: SY3A0R-5U1／SY5A0R-5U1＝OK、SY3A0R-5U1-C6＝NG（口径記号は付かない）、
+       SY3A3R-5U1-C6／SY5A3R-5U1-C6＝OK、SY7A0R-5U1／SY7A3R-5U1-C6＝NG。
+       ※v12 の初版では「横配管形は成立しない」と誤って判定していた（口径記号を付けたまま試したため）。 */
+    if (series === '7') return '⚠ 絞り弁付真空破壊バルブはSY3000/SY5000のみ対応です（カタログ p.404 注4）';
+    var isUpperVac = (pipe === '上配管');
+    var pcode = isUpperVac ? '3' : '0';
     return 'SY' + series + 'A' + pcode + 'R' + (spec.coil||'')
       + '-' + (spec.voltage||'5') + (spec.lamp||'') + (spec.manual||'') + '1'
-      + '-' + (spec.vacBport||'--') + (spec.screw ? '-' + spec.screw : '');
+      + (isUpperVac ? ('-' + (spec.vacBport||'--')) : '')
+      + (spec.screw ? '-' + spec.screw : '');
   }
 
   if (spec.special === 'pressure') {
@@ -3818,10 +3830,13 @@ function veCommonElecRows(idx, spec) {
         + '<span style="font-size:9px;color:#94a3b8;">' + codeDesc + '</span></div>';
 
   html += veBtnRow(idx,'manual','マニュアル',[
-    /* v12: G（安全スライドロック）はカタログ p.423 に記載があるが、品番確認では全シリーズで成立しない
-       （SY3100-5UG1／SY5200-5UG1／SY7200-5UG1＝NG。D/E/F は OK）。選べないようにして理由を出す。 */
-    {v:'',l:'NL'},{v:'D',l:'D(ドライバ)'},{v:'E',l:'E(手動)'},{v:'F',l:'F(スライド)'},{v:'G',l:'G(安全スライドロック)',ok:false}
-  ], spec.manual||'', '※G(安全スライドロック)はカタログp.423に記載がありますが、メーカーの品番確認では成立しません（要営業確認）');
+    /* v12: マニュアル操作の記号は 無記号(ノンロックプッシュ式)／D(プッシュターンロック式・ドライバ操作形)／
+       E(同・手操作形)／F(スライド形ロック式) の4つだけ（カタログ p.404・p.415 の y マニュアル）。
+       「安全スライドロックマニュアル」は**マニュアル欄の記号Gではなく、オーダーメイド -X13**（カタログ p.423
+       「安全スライドロックマニュアル／SY3000/5000/7000-X13」）。v11 は G を記号として持っていたが誤りで、
+       品番確認でも SY3100-5UG1／SY5200-5UG1／SY7200-5UG1 は全てNG（D/E/F はOK）。 */
+    {v:'',l:'NL'},{v:'D',l:'D(ドライバ)'},{v:'E',l:'E(手動)'},{v:'F',l:'F(スライド)'},{v:'G',l:'G(旧: 安全スライドロック)',ok:false}
+  ], spec.manual||'', '※安全スライドロックマニュアルはマニュアル欄の記号ではなく、オーダーメイド「-X13」です（カタログp.423）。品番末尾に -X13 を付けてメーカーへ手配してください');
   return html;
 }
 
@@ -6277,7 +6292,7 @@ function _applyWiringCode(code) {
     return true;
   }
   if (code === 'SA3N' || code === 'S') {
-    setWiring('ex500'); setEx500Si(code === 'SA3N' ? 'A3N' : (code === 'SEB' ? 'EB' : (code === 'SFA' ? 'FA' : 'A3N')));
+    setWiring('ex500'); setEx500Si(code === 'SA3N' ? 'A3N' : '0');
     return true;
   }
   if (code.charAt(0) === 'S') {
@@ -6800,7 +6815,7 @@ function sanitizeAllValves() {
   }
   // 連数: 配線方式の上限超過をクランプ（配線切替後に旧連数が残るのを防ぐ）
   if (S.wiring) {
-    var stLimS = getWiringLimits().st;
+    var stLimS = Math.min(getWiringLimits().st, getEportStationMax());
     if (S.valveCount > stLimS) {
       S.valveCount = stLimS;
       S.valveTypes = S.valveTypes.slice(0, stLimS);
@@ -6841,7 +6856,7 @@ function sanitizeAllValves() {
     }
     // v12: 背圧防止弁H・絞り弁付真空切換弁・残圧排気弁付の成立条件（品番確認で実証）を最終ガード
     if (spec.backpress === 'H' && !backpressAllowed(S.series, spec)) spec.backpress = '';
-    if (spec.special === 'vacuum' && (S.pipe !== '上配管' || S.series === '7')) spec.special = '';
+    if (spec.special === 'vacuum' && S.series === '7') spec.special = '';
     if (spec.special === 'residual' && (S.pipe === '上配管' || S.series === '3')) spec.special = '';
     // 節電コイル(T)はZ/NZのみ（ランプ+サージ付・コモン必須。U=無極性の設定はない）
     // UI操作では強制済みだが、JSON読込・逆引き経由の残留を封鎖する

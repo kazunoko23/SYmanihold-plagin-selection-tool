@@ -53,11 +53,12 @@ new Function(
 ;__ex.S=S; __ex.buildPN=buildPN; __ex.sanitizeAllValves=sanitizeAllValves;
  __ex.updateMountOptions=updateMountOptions; __ex.getBlockingDiscPN=getBlockingDiscPN;
  __ex.getEx250MaxInputBlocks=getEx250MaxInputBlocks;
- __ex.getValvePN=getValvePN; __ex.backpressAllowed=backpressAllowed;`
+ __ex.getValvePN=getValvePN; __ex.backpressAllowed=backpressAllowed;
+ __ex.getEportStationMax=getEportStationMax; __ex.getWiringLimits=getWiringLimits;`
 )(globalThis.document, globalThis.window, globalThis.alert, globalThis.localStorage,
   globalThis.navigator, globalThis.XLSX, globalThis.FileReader, globalThis.Blob, globalThis.URL, ex);
 
-const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed } = ex;
+const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed, getEportStationMax, getWiringLimits } = ex;
 const S0 = JSON.parse(JSON.stringify(S));
 
 let pass = 0, fail = 0;
@@ -199,7 +200,15 @@ console.log('──────────────────────�
   setValve('7','上配管',{ special:'vacuum' });
   ck('v12 真空: SY7000は警告', /⚠/.test(getValvePN(0)), true);
   setValve('5','横配管',{ special:'vacuum' });
-  ck('v12 真空: 横配管形は警告', /⚠/.test(getValvePN(0)), true);
+  ck('v12 真空: 横配管形は口径記号なしで成立', /^SY5A0R-5U1$/.test(getValvePN(0)), true);
+  /* v12訂正: 連数上限は「P,Eポート取出位置」で決まる（配線方式に関わらず共通）。
+     実証: SS5Y3-10TC-10U/-10D=OK、-12U/-12D=NG、-12B/-16B/-24B=OK、SS5Y3-10F2-16B-C6=OK／-12D=NG。
+     一時 TC だけ一律10連にしていたが、両側Bの11〜24連を塞いでしまう誤りだった */
+  ck('v12 P,E取出位置 U/D は10連まで', getEportStationMax(), 10);
+  globalThis.document.getElementById('sel-eport').value = 'B';
+  ck('v12 P,E取出位置 両側B は24連まで', getEportStationMax(), 24);
+  ck('v12 TCの配線方式上限はカタログどおり24', (function(){ S.wiring='term_sp'; return getWiringLimits().st; })(), 24);
+  globalThis.document.getElementById('sel-eport').value = 'U';
   // sanitize が成立しない組合せを落とす
   setValve('7','横配管',{ type:'3cs', backpress:'H' });
   sanitizeAllValves();
