@@ -7,8 +7,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const html = readFileSync(join(here, '..', 'smc_sy_plugin_v12.html'), 'utf8');
-const HTML_PATH_FOR_DISCON_TEST = join(here, '..', 'smc_sy_plugin_v12.html');
+const html = readFileSync(join(here, '..', 'smc_sy_plugin_v13.html'), 'utf8');
+const HTML_PATH_FOR_DISCON_TEST = join(here, '..', 'smc_sy_plugin_v13.html');
 // scriptブロックが増えても壊れないよう buildPN を含むブロックを探す
 const blocks = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 const appJs = blocks.find(b => /function buildPN/.test(b));
@@ -54,11 +54,14 @@ new Function(
  __ex.updateMountOptions=updateMountOptions; __ex.getBlockingDiscPN=getBlockingDiscPN;
  __ex.getEx250MaxInputBlocks=getEx250MaxInputBlocks;
  __ex.getValvePN=getValvePN; __ex.backpressAllowed=backpressAllowed;
- __ex.getEportStationMax=getEportStationMax; __ex.getWiringLimits=getWiringLimits;`
+ __ex.getEportStationMax=getEportStationMax; __ex.getWiringLimits=getWiringLimits;
+ __ex.getMountCode=getMountCode; __ex.getAbActualCode=getAbActualCode; __ex.AB_COMPAT=AB_COMPAT;
+ __ex.getValveSpec=getValveSpec; __ex.veSet=veSet; __ex.renderAbPortBody=renderAbPortBody;
+ __ex.updateMetalPeWrap=updateMetalPeWrap;`
 )(globalThis.document, globalThis.window, globalThis.alert, globalThis.localStorage,
   globalThis.navigator, globalThis.XLSX, globalThis.FileReader, globalThis.Blob, globalThis.URL, ex);
 
-const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed, getEportStationMax, getWiringLimits } = ex;
+const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed, getEportStationMax, getWiringLimits, getMountCode, getAbActualCode, AB_COMPAT, getValveSpec, veSet, renderAbPortBody, updateMetalPeWrap } = ex;
 const S0 = JSON.parse(JSON.stringify(S));
 
 let pass = 0, fail = 0;
@@ -213,6 +216,153 @@ console.log('──────────────────────�
   setValve('7','横配管',{ type:'3cs', backpress:'H' });
   sanitizeAllValves();
   ck('v12 sanitize: 成立しないHを落とす', (S.valveSpecs[0].backpress||''), '');
+}
+
+console.log('══════════════════════════════════════');
+console.log('v13: くうあつーる再検証(2026-08-27〜29)で確定したパターンA〜I ＋副産物 の修正確認');
+console.log('══════════════════════════════════════');
+
+function mkValve(opts) {
+  reset();
+  Object.assign(S, { series: opts.series, base: opts.base || 'conn', pipe: opts.pipe, wiring: opts.wiring || 'dsub' });
+  S.eportAssy = opts.eportAssy !== undefined ? opts.eportAssy : '';
+  if (S.wiring === 'dsub' || S.wiring === 'flat') {
+    S.connDir = opts.connDir || '1';
+    if (S.base === 'metal') S.metalFlatS = opts.metalFlatS !== undefined ? opts.metalFlatS : '';
+  }
+  setCount(opts.count || 5);
+  if (opts.abCode !== undefined) S.abCode = opts.abCode;
+  if (opts.abPipeType) S.abPipeType = opts.abPipeType;
+  if (opts.abDir) S.abDir = opts.abDir;
+  S.mountMethod = opts.mountMethod || 'direct';
+  if (S.mountMethod === 'din') S.mountDinLen = opts.mountDinLen !== undefined ? opts.mountDinLen : '';
+  if (opts.connUpperPePort !== undefined) S.connUpperPePort = opts.connUpperPePort;
+  globalThis.document.getElementById('sel-eport').value = opts.eport || 'D';
+  const spec = Object.assign({ type:'single', seal:'0', pilot:'0', backpress:'', pilotOpt:'', coil:'',
+    voltage:'5', lamp:'U', manual:'', screw:'', portSize:'', portScrew:'', special:null, vacBport:'' }, opts.spec||{});
+  S.valveSpecs = [spec];
+  for (let i=1;i<S.valveCount;i++) getValveSpec(i);
+  return spec;
+}
+
+console.log('════ v13 A) ワンタッチ継手径・M5にはねじ種類記号(F/N/T)を付けない ════');
+{
+  mkValve({ series:'3', pipe:'上配管', connUpperPePort:'', spec:{ portSize:'C6', portScrew:'' } });
+  ck('v13 A: SY3130-5U1-C6（ねじ種類なし）は成立', getValvePN(0), 'SY3130-5U1-C6');
+  veSet(0, 'portSize', '01');
+  veSet(0, 'portScrew', 'N');
+  ck('v13 A: portSize=01(ねじ口径)のときportScrewは保持される', getValveSpec(0).portScrew, 'N');
+  veSet(0, 'portSize', 'C6');
+  ck('v13 A: portSizeをC6(ワンタッチ)に変えるとportScrewは自動で外れる', getValveSpec(0).portScrew, '');
+
+  mkValve({ series:'5', pipe:'上配管', connUpperPePort:'', spec:{ portSize:'01', portScrew:'' } });
+  veSet(0, 'portScrew', 'N');
+  ck('v13 A: SY5130-5U1-01N（ねじ口径+NPT）は成立', getValvePN(0), 'SY5130-5U1-01N');
+  veSet(0, 'portSize', 'C6');
+  ck('v13 A: series5でC6(ワンタッチ)へ変更するとportScrewは自動で外れる', getValveSpec(0).portScrew, '');
+  ck('v13 A: SY5130-5U1-C6（ねじ種類なし）が生成される', getValvePN(0), 'SY5130-5U1-C6');
+
+  mkValve({ series:'5', pipe:'上配管', connUpperPePort:'', spec:{ portSize:'M5', portScrew:'N' } });
+  sanitizeAllValves();
+  ck('v13 A: sanitizeAllValvesでM5+portScrew残留を封鎖', getValveSpec(0).portScrew, '');
+}
+
+console.log('════ v13 B) 口径混合(CM/LM)を横配管/裏配管で選んだ時は個別バルブ品番に口径記号を付けない ════');
+{
+  mkValve({ series:'5', pipe:'横配管', abCode:'CM' });
+  ck('v13 B: 横配管+CM混合の個別バルブ品番は口径記号なし', getValvePN(0), 'SY5100-5U1');
+  getValveSpec(0).portSize = 'C8';
+  ck('v13 B: portSizeを設定しても横配管+CM品番には出ない', getValvePN(0), 'SY5100-5U1');
+
+  mkValve({ series:'5', pipe:'裏配管', abCode:'LM', spec:{ portSize:'C8' } });
+  ck('v13 B: 裏配管+LM混合でも品番に口径記号は出ない', getValvePN(0), 'SY5100-5U1');
+
+  mkValve({ series:'5', pipe:'上配管', connUpperPePort:'', spec:{ portSize:'C8' } });
+  ck('v13 B対照: 上配管形は従来通り口径記号が出る', getValvePN(0), 'SY5130-5U1-C8');
+}
+
+console.log('════ v13 C) SY5000上配管ポート選択肢からC10を除外 ════');
+{
+  const m5 = html.match(/else if\(series==='5'\) portOpts=\[[\s\S]*?\];/);
+  ck('v13 C: series5のportOpts配列が見つかる', !!m5, true);
+  if (m5) {
+    ck('v13 C: series5のportOpts配列にC10は含まれない', /'C10'/.test(m5[0]), false);
+    ck('v13 C: series5のportOpts配列にC8は含まれる(存置)', /'C8'/.test(m5[0]), true);
+  }
+  const m7 = html.match(/else portOpts=\[[\s\S]*?\];/);
+  if (m7) ck('v13 C: series7のportOpts配列にC10は含まれる(変更なし)', /'C10'/.test(m7[0]), true);
+}
+
+console.log('════ v13 F) 金属ベース裏配管(51型)はP,Eポート取出位置Dのみ ════');
+{
+  mkValve({ series:'5', base:'metal', pipe:'裏配管', abCode:'C6', eport:'U', count:6 });
+  const full1 = pn();
+  ck('v13 F: eport=Uで開始しても51型はDに補正される', globalThis.document.getElementById('sel-eport').value, 'D');
+  ck('v13 F: 51型はD位置の品番になる', full1, 'SS5Y5-51F1-06D-C6');
+
+  mkValve({ series:'7', base:'metal', pipe:'裏配管', abCode:'C8', eport:'B', count:5 });
+  pn();
+  ck('v13 F: series7でもeport=BからDに補正される', globalThis.document.getElementById('sel-eport').value, 'D');
+
+  mkValve({ series:'5', base:'conn', pipe:'裏配管', abCode:'C6', eport:'U', count:5 });
+  pn();
+  ck('v13 F対照: 11型(コネクタベース裏配管)はU/D/B制約なし(Uのまま)', globalThis.document.getElementById('sel-eport').value, 'U');
+}
+
+console.log('════ v13 G) 上配管形(12/52型)はDINレール取付非対応 ════');
+{
+  mkValve({ series:'3', base:'conn', pipe:'上配管', wiring:'term_sp', connUpperPePort:'', mountMethod:'direct', count:3, eport:'U' });
+  ck('v13 G: 直接取付はOK(選定完了)', pn(), 'SS5Y3-12TC-03U');
+
+  mkValve({ series:'3', base:'conn', pipe:'上配管', wiring:'term_sp', connUpperPePort:'', mountMethod:'din', mountDinLen:'', count:3, eport:'U' });
+  ck('v13 G: DINレール(標準長)はgetMountCodeがnull', getMountCode(), null);
+  ck('v13 G: DIN指定時は品番が未完成(complete=false)', buildPN().complete, false);
+
+  mkValve({ series:'5', base:'metal', pipe:'上配管', wiring:'dsub', metalFlatS:'', mountMethod:'din', mountDinLen:'8', count:4, eport:'U', spec:{ portSize:'C8' } });
+  for (let i=0;i<4;i++) getValveSpec(i).portSize='C8';
+  ck('v13 G: 金属ベース上配管(52型)でもDINは未完成扱い', buildPN().complete, false);
+}
+
+console.log('════ v13 H) SY7000はエルボ継手にインチ表記(LN#/BN#)が実在しない ════');
+{
+  S.series = '7';
+  ck('v13 H: SY7000エルボ上向きミリ(L6)は成立', getAbActualCode('C6','EL_UP','mm'), 'L6');
+  ck('v13 H: SY7000エルボ上向きにインチ指定してもミリ表記に強制される', getAbActualCode('C6','EL_UP','inch'), 'L6');
+  ck('v13 H: SY7000エルボ下向きインチ指定もミリに強制される', getAbActualCode('C8','EL_DN','inch'), 'B8');
+  ck('v13 H: SY7000ストレートはインチ可(N7・変更なし)', getAbActualCode('C6','ST','inch'), 'N7');
+  S.series = '5';
+  ck('v13 H対照: SY5000エルボはインチ表記が成立する(既存動作を維持)', getAbActualCode('C6','EL_UP','inch'), 'LN7');
+  S.series = '3';
+  ck('v13 H対照: SY3000エルボもインチ表記が成立する(既存動作を維持)', getAbActualCode('C4','EL_UP','inch'), 'LN3');
+}
+
+console.log('════ v13 I) 金属ベースSY7000のA,BポートはC8/C10のみ ════');
+{
+  ck('v13 I: metal_横配管_7のSTがC8,C10のみに限定', JSON.stringify(AB_COMPAT['metal_横配管_7'].ST), JSON.stringify(['C8','C10']));
+  ck('v13 I: metal_裏配管_7のSTがC8,C10のみに限定', JSON.stringify(AB_COMPAT['metal_裏配管_7'].ST), JSON.stringify(['C8','C10']));
+
+  mkValve({ series:'7', base:'metal', pipe:'横配管', abCode:'C6', count:5 });
+  sanitizeAllValves();
+  ck('v13 I: 金属ベースSY7000でC6を指定するとsanitizeで無効化される', S.abCode, null);
+
+  mkValve({ series:'7', base:'metal', pipe:'横配管', abCode:'C12', count:5 });
+  sanitizeAllValves();
+  ck('v13 I: 金属ベースSY7000でC12を指定するとsanitizeで無効化される', S.abCode, null);
+
+  mkValve({ series:'7', base:'metal', pipe:'横配管', abCode:'C8', count:5 });
+  sanitizeAllValves();
+  ck('v13 I: C8はそのまま有効', S.abCode, 'C8');
+}
+
+console.log('════ v13 副産物) SY5000金属ベース×EX510はA,BポートC4が不成立 ════');
+{
+  mkValve({ series:'5', base:'metal', pipe:'横配管', wiring:'ex510', abCode:'C4', count:5 });
+  sanitizeAllValves();
+  ck('v13 副産物: EX510配線でC4はsanitizeで無効化される', S.abCode, null);
+
+  mkValve({ series:'5', base:'metal', pipe:'横配管', wiring:'dsub', metalFlatS:'', abCode:'C4', count:5 });
+  sanitizeAllValves();
+  ck('v13 副産物対照: dsub配線ではC4は維持される(既存動作)', S.abCode, 'C4');
 }
 
 console.log(`結果: ${pass} passed / ${fail} failed`);
