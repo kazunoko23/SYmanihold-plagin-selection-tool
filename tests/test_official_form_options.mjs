@@ -92,12 +92,16 @@ for (const { name, path } of found) {
     }
     const sz = { '3': 'C6', '5': 'C8', '7': 'C10' }[S.series];
     getValveSpec(1).manifoldOpt = { supSpacerPipe: '1A', supSpacerSize: sz };
-    getValveSpec(2).manifoldOpt = { exhSpacerPipe: '3A', exhSpacerSize: sz };
+    // v15: 1連目にパイロット弁オプション・背圧防止弁Ass'y・SUPブロッキングディスク
+    getValveSpec(0).pilotOpt = 'B';
+    getValveSpec(0).manifoldOpt = Object.assign({}, getValveSpec(0).manifoldOpt || {}, { backpressAssy: true, blockingDiscSup: true });
+    const szEl = { '3': 'L4', '5': 'L6', '7': 'L10' }[S.series];   // エルボ(2A/3A)はL系（v15〜 実在組合せのみ）
+    getValveSpec(2).manifoldOpt = { exhSpacerPipe: '3A', exhSpacerSize: szEl };
     getValveSpec(S.valveCount - 1).manifoldOpt = { slot: 'blanking' };   // 最終連（金属ベースは4連になる）
     updateAll();
     const pn = buildPN();
-    pn.sz = sz; pn.last = S.valveCount;
-    return { pn: pn.full, complete: !!pn.complete, sz: pn.sz, last: pn.last };
+    pn.sz = sz; pn.szEl = szEl; pn.last = S.valveCount;
+    return { pn: pn.full, complete: !!pn.complete, sz: pn.sz, szEl: pn.szEl, last: pn.last, metal: S.base === 'metal', ab: (S.pipe !== '上配管' && S.abCode && S.abCode !== 'CM' && S.abCode !== 'LM') ? S.abCode : '' };
   }, c);
 
   const b64 = readFileSync(path).toString('base64');
@@ -135,10 +139,22 @@ for (const { name, path } of found) {
       .sort((a, b) => a - b).find(lr => mount.some(m => Math.abs(m - lr) <= 3)) || 0;
     const v = (n, row) => (cells[st[n] + row] === undefined ? '' : String(cells[st[n] + row]));
     const rB = lab("ブランキングプレートAss'y"), rS = lab('単独SUP.スペーサ'), rE = lab('単独EXH.スペーサ');
+    const nz = x => String(x).replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).replace(/[\s\u3000]/g, '');
+    const firstRow = f => keys.filter(r => f(nz(cells[r]), r)).map(rowNum).sort((a, b) => a - b)[0] || 0;
+    const dCol = keys.filter(r => nz(cells[r]) === 'D側').map(r => _colToNum(colOf(r))).sort((a, b) => a - b)[0] || 99;
+    const left = r => _colToNum(colOf(r)) < dCol;
+    const rPO = firstRow((t, r) => left(r) && /パイロット弁?オプション/.test(t));
+    const rBP = firstRow((t, r) => left(r) && t.indexOf("背圧防止弁Ass'y") >= 0);
+    const rDS = firstRow((t, r) => left(r) && t.indexOf('SUP.ブロッキングディスク') >= 0);
+    const rG  = firstRow((t, r) => left(r) && t.indexOf('A,Bポート管接続口径') >= 0
+      && keys.some(k => rowNum(k) === rowNum(r) && left(k) && nz(cells[k]) === 'Aポート'));
+    const discRow = rDS ? keys.filter(r => rowNum(r) === rDS && String(cells[r]) === '○').length : -1;
+    const listText = keys.filter(r => /SY\d0M-26-/.test(String(cells[r]))).map(r => String(cells[r])).join(' ');
     // 搭載順番行に何か書かれていないか（全連）
     const mountDirty = [];
     mount.forEach(m => Object.keys(st).forEach(n => { if (v(n, m)) mountDirty.push(n + '連@' + m + '=' + v(n, m)); }));
-    return { rB, rS, rE, blankLast: v(last, rB), supV: v(2, rS), supW: v(2, rS + 1), exhV: v(3, rE), exhW: v(3, rE + 1),
+    return { rDS, rPO, po1: rPO ? v(1, rPO) : '-', rBP, bp1: rBP ? v(1, rBP) : '-', discRow, rG, g1: rG ? v(1, rG) + '/' + v(1, rG + 1) : '-', listText,
+             rB, rS, rE, blankLast: v(last, rB), supV: v(2, rS), supW: v(2, rS + 1), exhV: v(3, rE), exhW: v(3, rE + 1),
              blankOther: Object.keys(st).filter(n => +n !== last).map(n => v(n, rB)).join(''), mountDirty };
   }, setup.last);
   const errs1 = [];
@@ -146,9 +162,16 @@ for (const { name, path } of found) {
   if (got.blankLast !== '○') errs1.push(`ブランキング${setup.last}連目="${got.blankLast}"`);
   if (got.blankOther) errs1.push(`ブランキング他連="${got.blankOther}"`);
   if (got.supV !== '1' || got.supW !== setup.sz) errs1.push(`SUPスペーサ2連目 V="${got.supV}" W="${got.supW}"`);
-  if (got.exhV !== '3' || got.exhW !== setup.sz) errs1.push(`EXHスペーサ3連目 V="${got.exhV}" W="${got.exhW}"`);
+  if (got.exhV !== '3' || got.exhW !== setup.szEl) errs1.push(`EXHスペーサ3連目 V="${got.exhV}" W="${got.exhW}"`);
   if (got.mountDirty.length) errs1.push('搭載順番行に記入: ' + got.mountDirty.join(','));
-  if (!errs1.length) { pass++; console.log(`  OK ${name.padEnd(28)} ブランキング行${got.rB} SUP行${got.rS} EXH行${got.rE}`); }
+  // v15 追加分
+  if (got.rPO && got.po1 !== 'B') errs1.push(`パイロット弁オプション1連目="${got.po1}"`);
+  if (got.rBP && got.bp1 !== '○') errs1.push(`背圧防止弁Ass'y1連目="${got.bp1}"`);
+  if (got.rDS && got.discRow !== 1) errs1.push(`SUPブロッキングディスク○=${got.discRow}個`);
+  if (setup.ab && got.rG && got.g1 !== setup.ab + '/' + setup.ab) errs1.push(`A,B口径1連目="${got.g1}"（期待 ${setup.ab}）`);
+  const wantBlk = setup.metal ? '-26-2A' : '-26-1A';
+  if (got.listText.indexOf(wantBlk) < 0) errs1.push(`構成製品リストのブランキング="${got.listText}"（期待 ${wantBlk}）`);
+  if (!errs1.length) { pass++; console.log(`  OK ${name.padEnd(28)} ブランキング行${got.rB} SUP行${got.rS} EXH行${got.rE} ディスク行${got.rDS}(○${got.discRow}) 口径${got.g1}`); }
   else { fail++; console.log(`  NG ${name.padEnd(28)} ${errs1.join(' / ')}  (行: B${got.rB} S${got.rS} E${got.rE} / 品番 ${setup.pn})`); }
 }
 
