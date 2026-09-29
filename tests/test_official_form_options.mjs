@@ -1,13 +1,12 @@
-// 公式仕様書「◆マニホールド型式」ボックスの記入位置テスト
+// 公式仕様書「マニホールドオプション」欄の記入位置テスト（v14〜）
 //
-// テンプレの型式ボックスは  ― SS5Y□ ― [固定表記] [枠][枠] ― [枠][枠] ― [枠]  の形をしており、
-// 枠に入れる値は「―」で区切られた3グループに配る。基準となる固定表記の列を取り違えると
-// グループが丸ごとずれて、連数がコネクタ種類の枠に入る等の誤記入になる。
-// ここでは記入後のボックスを左から連結し、選定品番と一致することを確認する。
+// 各スペーサ区画は  [搭載順番(灰色)] → [品名ラベル行] → [品番行]  の順に並ぶ。
+// 「搭載順番」はスペーサ2段重ね時の順番欄なので、ツールは何も書かない。
+//   ・ブランキングプレート: 品名ラベル行の該当連に ○
+//   ・単独SUP/EXHスペーサ : 品名ラベル行＝継手仕様(1/2/3)、次の行＝口径
+// v13までは搭載順番行に○を書いて1段ずれていた（SMC公式の記入例と照合して判明）。
 //
-// テンプレート（SMC配布のxlsx）はリポジトリに含めないため、展開済みフォルダを引数で渡す。
-//   node tests/test_official_form_modelbox.mjs <テンプレ展開フォルダ>
-// 省略時は既定パスを見に行き、無ければSKIPする。
+//   node tests/test_official_form_options.mjs <テンプレ展開フォルダ>
 import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -82,7 +81,7 @@ for (const { name, path } of found) {
     if (c.upperPe !== undefined && typeof setConnUpperPePort === 'function') setConnUpperPePort(c.upperPe);
     if (c.mix) { S.mixBig = c.mix[0]; S.mixSmall = c.mix[1]; S.abCode = 'C' + c.mix[0] + c.mix[1]; }
     setMountMethod('direct');
-    const kinds = ['single', 'double', '3cs', 'single', 'blank'];
+    const kinds = ['single', 'double', '3cs', 'single', 'single'];
     for (let i = 0; i < S.valveCount; i++) {
       const k = kinds[i % kinds.length];
       S.valveTypes[i] = k; getValveSpec(i).type = k;
@@ -91,9 +90,14 @@ for (const { name, path } of found) {
         getValveSpec(i).portSize = (S.series === '3' ? 'C6' : 'C8');
       }
     }
+    const sz = { '3': 'C6', '5': 'C8', '7': 'C10' }[S.series];
+    getValveSpec(1).manifoldOpt = { supSpacerPipe: '1A', supSpacerSize: sz };
+    getValveSpec(2).manifoldOpt = { exhSpacerPipe: '3A', exhSpacerSize: sz };
+    getValveSpec(S.valveCount - 1).manifoldOpt = { slot: 'blanking' };   // 最終連（金属ベースは4連になる）
     updateAll();
     const pn = buildPN();
-    return { pn: pn.full, complete: !!pn.complete };
+    pn.sz = sz; pn.last = S.valveCount;
+    return { pn: pn.full, complete: !!pn.complete, sz: pn.sz, last: pn.last };
   }, c);
 
   const b64 = readFileSync(path).toString('base64');
@@ -111,8 +115,8 @@ for (const { name, path } of found) {
   if (res.error) { fail++; console.log(`  NG ${name} — 記入失敗: ${res.error}`); continue; }
   if (!setup.complete) { fail++; console.log(`  NG ${name} — 選定が未完了: ${setup.pn}`); continue; }
 
-  // 記入後のxlsxは、ツール自身のZIP/シートパーサをページ内で再利用して読む
-  const assembled = await page.evaluate(async () => {
+  // 記入後のxlsxを、ツール自身のZIP/シートパーサで読み直して検査する
+  const got = await page.evaluate(async (last) => {
     const ab = await window.__captured.arrayBuffer();
     const entries = _zipParse(new Uint8Array(ab));
     const sheet = entries.filter(e => /^xl\/worksheets\/sheet\d+\.xml$/.test(e.name))
@@ -121,22 +125,31 @@ for (const { name, path } of found) {
     const cells = _sheetCellMap(await _zipEntryText(entries, sheet.name), sst);
     const rowNum = r => parseInt(r.match(/\d+$/)[0], 10);
     const colOf  = r => r.match(/^[A-Z]+/)[0];
-    const anchor = Object.keys(cells).find(r =>
-      String(cells[r]).indexOf('マニホールド型式') >= 0 && String(cells[r]).indexOf('◆') >= 0);
-    if (!anchor) return '(型式行なし)';
-    const row = rowNum(anchor);
-    return Object.keys(cells).filter(r => rowNum(r) === row)
-      .sort((a, b) => _colToNum(colOf(a)) - _colToNum(colOf(b)))
-      .map(r => String(cells[r]).trim())
-      .filter(v => v && v.indexOf('◆') < 0 && v !== '⇒' && v.indexOf('右頁') < 0)
-      .join('')
-      .replace(/―/g, '-')
-      .replace(/[Ａ-Ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
-      .replace(/^-+|-+$/g, '');
-  });
-  const expect = setup.pn;
-  if (assembled === expect) { pass++; console.log(`  OK ${name.padEnd(28)} ${assembled}`); }
-  else { fail++; console.log(`  NG ${name.padEnd(28)} 型式ボックス="${assembled}" 期待="${expect}"`); }
+    const keys = Object.keys(cells);
+    const hdr = keys.filter(r => cells[r] === 'Ｄ側').map(rowNum).sort((a, b) => a - b)[0];
+    const st = {};
+    keys.filter(r => rowNum(r) === hdr && /^\d+$/.test(String(cells[r]).trim()))
+      .forEach(r => { st[+String(cells[r]).trim()] = colOf(r); });
+    const mount = keys.filter(r => cells[r] === '搭載順番').map(rowNum);
+    const lab = sub => keys.filter(r => String(cells[r]).indexOf(sub) >= 0).map(rowNum)
+      .sort((a, b) => a - b).find(lr => mount.some(m => Math.abs(m - lr) <= 3)) || 0;
+    const v = (n, row) => (cells[st[n] + row] === undefined ? '' : String(cells[st[n] + row]));
+    const rB = lab("ブランキングプレートAss'y"), rS = lab('単独SUP.スペーサ'), rE = lab('単独EXH.スペーサ');
+    // 搭載順番行に何か書かれていないか（全連）
+    const mountDirty = [];
+    mount.forEach(m => Object.keys(st).forEach(n => { if (v(n, m)) mountDirty.push(n + '連@' + m + '=' + v(n, m)); }));
+    return { rB, rS, rE, blankLast: v(last, rB), supV: v(2, rS), supW: v(2, rS + 1), exhV: v(3, rE), exhW: v(3, rE + 1),
+             blankOther: Object.keys(st).filter(n => +n !== last).map(n => v(n, rB)).join(''), mountDirty };
+  }, setup.last);
+  const errs1 = [];
+  if (!got.rB || !got.rS || !got.rE) errs1.push(`ラベル行が見つからない B${got.rB} S${got.rS} E${got.rE}`);
+  if (got.blankLast !== '○') errs1.push(`ブランキング${setup.last}連目="${got.blankLast}"`);
+  if (got.blankOther) errs1.push(`ブランキング他連="${got.blankOther}"`);
+  if (got.supV !== '1' || got.supW !== setup.sz) errs1.push(`SUPスペーサ2連目 V="${got.supV}" W="${got.supW}"`);
+  if (got.exhV !== '3' || got.exhW !== setup.sz) errs1.push(`EXHスペーサ3連目 V="${got.exhV}" W="${got.exhW}"`);
+  if (got.mountDirty.length) errs1.push('搭載順番行に記入: ' + got.mountDirty.join(','));
+  if (!errs1.length) { pass++; console.log(`  OK ${name.padEnd(28)} ブランキング行${got.rB} SUP行${got.rS} EXH行${got.rE}`); }
+  else { fail++; console.log(`  NG ${name.padEnd(28)} ${errs1.join(' / ')}  (行: B${got.rB} S${got.rS} E${got.rE} / 品番 ${setup.pn})`); }
 }
 
 console.log('──────────────────────────────');
