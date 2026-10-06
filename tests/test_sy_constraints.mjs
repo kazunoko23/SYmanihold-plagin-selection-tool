@@ -7,8 +7,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const html = readFileSync(join(here, '..', 'smc_sy_plugin_v15.html'), 'utf8');
-const HTML_PATH_FOR_DISCON_TEST = join(here, '..', 'smc_sy_plugin_v15.html');
+const html = readFileSync(join(here, '..', 'smc_sy_plugin_v16.html'), 'utf8');
+const HTML_PATH_FOR_DISCON_TEST = join(here, '..', 'smc_sy_plugin_v16.html');
 // scriptブロックが増えても壊れないよう buildPN を含むブロックを探す
 const blocks = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 const appJs = blocks.find(b => /function buildPN/.test(b));
