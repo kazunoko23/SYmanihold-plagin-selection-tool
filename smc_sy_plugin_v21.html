@@ -5349,8 +5349,12 @@ function buildPN() {
     // 品番: S6[③SIユニット仕様][④出力極性・エンドプレート][⑤I/Oユニット連数]（例 S6Q72）
     const io600 = (!isEp600 && S.ex600Si && S.ex600Si !== '0' && S.ex600IoUnits && S.ex600IoUnits.length > 0)
       ? String(Math.min(S.ex600IoUnits.length, 9)) : '';
+    // 逆引きで台数だけ分かっている場合（機種未選択）も⑤は品番に残す。機種が決まるまで未完了
+    //（v20/v12 までは台数が落ちて S6Q72 → S6Q7 のまま完了扱い・公式仕様書にも記入されていた）
+    const io600Pend = (!io600 && !isEp600 && S.ex600Si && S.ex600Si !== '0' && /^[1-9]$/.test(S.ex600IoCount || '')) ? S.ex600IoCount : '';
+    if (io600Pend) { complete = false; notes.push('⚠ EX600 I/Oユニット' + io600Pend + '連: 機種をStep5で選択してください'); }
     const pol600 = (isEp600 || S.ex600Si === '0') ? '' : (S.ex600Io||'');
-    typeCode = `${typ}S6${S.ex600Si||'0'}${pol600}${io600}`;
+    typeCode = `${typ}S6${S.ex600Si||'0'}${pol600}${io600 || io600Pend}`;
     notes.push(`EX600 シリアル伝送システム p.502〜503（10/11型）/ p.512〜513（12型）`);
     // 監査 2026-08-10: EX600 SIユニット記号 WS の実体は EX600-WSV1/WSV2（旧EX600-Wカタログの手配例
     // 「SS5Y3-10S6WS72-05B-C6 … EX600-WSV1」）。2026年8月生産終了で後継は EXW1 系。
@@ -6566,6 +6570,7 @@ function _applyWiringCode(code) {
   if ((m = code.match(/^S6(EP|WS|EB|DA|FA|FB|Q|N|V|0)([2-9])?([1-9])?$/))) {
     setWiring('ex600'); setEx600Si(m[1]);
     if (m[2]) setEx600Io(m[2]);
+    if (m[3] && !(S.ex600IoUnits && S.ex600IoUnits.length)) S.ex600IoCount = m[3];
     return { ok: true, note: m[3] ? ('EX600 I/Oユニット' + m[3] + '連: 機種はStep5で選択してください') : null };
   }
   if ((m = code.match(/^S5(N?)(S?)$/))) { setWiring('ex510'); setEx510N(m[1]); setEx510S(m[2]); return true; }
