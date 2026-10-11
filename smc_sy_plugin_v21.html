@@ -1021,6 +1021,7 @@ const S = {
   abDir: null,       // 'ST'|'EL_UP'|'EL_DN'  (push時)
   abCode: null,      // 実品番コード e.g. 'C4','L6','BN7','01','M5'
   abUnit: 'mm',      // 'mm'|'inch'
+  abFitKind: '',     // v21: 金属ベースのワンタッチ管継手 ''=固定形(C/N) | 'K'=交換形(KC/KN)
   peFittingUnit: 'mm', // 'mm'|'inch' — P,Eポート継手単位
   peFittingDir:  null, // 'ST'|'EL_UP'|'EL_DN' — LM+横配管時のP,E継手方向
   // 取付方法・オプション
@@ -1314,30 +1315,33 @@ function getCompat() {
 // STコード=ストレート, ELコード=エルボ共通(上/下で L/B プレフィックス変換)
 // SCREWコード=ねじ配管 (M5/'01'/'02'/'03')
 // ════════════════════════════════════════════════════
+/* v21: 金属ベース(50/51型)の K = 交換形ワンタッチ管継手 KC□/KN□（カタログ p.636「交換形」表。
+   品番確認 2026-10-12: SS5Y3-50F1-05U-KC6/-KC2/-KN7・SS5Y5-50F1-05U-KC8/-KC4・SS5Y7-50F1-05U-KC12/-KN11・SS5Y3-51F1-05D-KC6=OK）。
+   口径混合は CM ではなく M（交換形のみ混合可。SS5Y5-51F1-05D-M=OK／SS5Y3-50F1-05U-CM=NG） */
 const AB_COMPAT = {
   // コネクタ接続ベース (10/11/12型) — Excelバリエーション一覧より
   conn_横配管_3:  { ST:['C2','C3','C4','C6'],         EL:['C4','C6'],        SCREW:[] },
   conn_横配管_5:  { ST:['C4','C6','C8'],              EL:['C4','C6','C8'],   SCREW:[] },
-  conn_横配管_7:  { ST:['C6','C8','C10','C12'],       EL:['C6','C8','C10'],  SCREW:[] },
+  conn_横配管_7:  { ST:['C6','C8','C10','C12'],       EL:['C6','C8','C10','C12'], SCREW:[] }, // v21: L12/B12 あり（カタログ p.430、品番確認 SS5Y7-10F1-05U-L12/-B12=OK）
   conn_裏配管_5:  { ST:['C4','C6','C8'],              EL:[],                 SCREW:[] },
   conn_裏配管_7:  { ST:['C6','C8','C10','C12'],       EL:[],                 SCREW:[] },
   conn_上配管_3:  { ST:['C2','C3','C4','C6'],         EL:[],                 SCREW:['M5'] },
   conn_上配管_5:  { ST:['C4','C6','C8'],              EL:[],                 SCREW:['01'] },
   conn_上配管_7:  { ST:['C6','C8','C10','C12'],       EL:[],                 SCREW:['02'] },
   // 金属ベース (50/51/52型)
-  metal_横配管_3: { ST:['C2','C3','C4','C6'],         EL:[],                 SCREW:['M5','01'] },
-  metal_横配管_5: { ST:['C4','C6','C8'],              EL:[],                 SCREW:['01','02'] },
-  metal_横配管_7: { ST:['C8','C10'],                  EL:[],                 SCREW:['02'] }, // v13: C6/C12は不成立（品番確認で実証: SS5Y7-50F1-05D-C6/-C12=NG）
-  metal_裏配管_3: { ST:['C2','C3','C4','C6'],         EL:[],                 SCREW:['M5','01'] },
-  metal_裏配管_5: { ST:['C4','C6','C8'],              EL:[],                 SCREW:['01','02'] },
-  metal_裏配管_7: { ST:['C8','C10'],                  EL:[],                 SCREW:['02'] }, // v13: C6/C12は不成立（品番確認で実証: SS5Y7-51F1-05D-C6/-C12=NG）
+  metal_横配管_3: { ST:['C2','C3','C4','C6'],         EL:[],                 SCREW:['M5','01'], K:['C2','C3','C4','C6'] },
+  metal_横配管_5: { ST:['C4','C6','C8'],              EL:[],                 SCREW:['01','02'], K:['C4','C6','C8'] },
+  metal_横配管_7: { ST:['C8','C10'],                  EL:[],                 SCREW:['02'], K:['C6','C8','C10','C12'] }, // v13: C6/C12は不成立（品番確認で実証: SS5Y7-50F1-05D-C6/-C12=NG）
+  metal_裏配管_3: { ST:['C2','C3','C4','C6'],         EL:[],                 SCREW:['M5','01'], K:['C2','C3','C4','C6'] },
+  metal_裏配管_5: { ST:['C4','C6','C8'],              EL:[],                 SCREW:['01','02'], K:['C4','C6','C8'] },
+  metal_裏配管_7: { ST:['C8','C10'],                  EL:[],                 SCREW:['02'], K:['C6','C8','C10','C12'] }, // v13: C6/C12は不成立（品番確認で実証: SS5Y7-51F1-05D-C6/-C12=NG）
   metal_上配管_3: { ST:['C2','C3','C4','C6'],         EL:[],                 SCREW:['M5'] },
   metal_上配管_5: { ST:['C4','C6','C8'],              EL:[],                 SCREW:['01'] },
   metal_上配管_7: { ST:['C6','C8','C10','C12'],       EL:[],                 SCREW:['02'] },
   // 混合取付ベース — コネクタベースと同等
   mixed_横配管_3: { ST:['C2','C3','C4','C6'],         EL:['C4','C6'],        SCREW:[] },
   mixed_横配管_5: { ST:['C4','C6','C8'],              EL:['C4','C6','C8'],   SCREW:[] },
-  mixed_横配管_7: { ST:['C6','C8','C10','C12'],       EL:['C6','C8','C10'],  SCREW:[] },
+  mixed_横配管_7: { ST:['C6','C8','C10','C12'],       EL:['C6','C8','C10','C12'], SCREW:[] },
   mixed_裏配管_5: { ST:['C4','C6','C8'],              EL:[],                 SCREW:[] },
   mixed_裏配管_7: { ST:['C6','C8','C10','C12'],       EL:[],                 SCREW:[] },
   mixed_上配管_3: { ST:['C2','C3','C4','C6'],         EL:[],                 SCREW:[] },
@@ -1368,6 +1372,40 @@ const AB_SIZE_DEF = {
   C12: { mmLabel:'ø12',   inchCode:null,  inchLabel:null },
 };
 
+// エルボ継手にインチ記号（LN/BN）があるか（v13: SY7000 は原則なし・v20: SY5000 C4 なし・v21: SY7000 C10=LN11/BN11 はあり）
+function elbowInchOk(cCode) {
+  const def = AB_SIZE_DEF[cCode];
+  if (!def || !def.inchCode) return false;
+  if (S.series === '7') return cCode === 'C10';
+  if (S.series === '5' && cCode === 'C4') return false;
+  return true;
+}
+// 口径混合（連ごとに口径を指示）か: コネクタベース CM/LM、金属ベース M
+function isAbMix(code) {
+  if (code === undefined) code = S.abCode;
+  return code === 'CM' || code === 'LM' || (S.base === 'metal' && code === 'M');
+}
+// 口径混合時の連別口径の選択肢（CM=ストレート／LM=エルボ／金属M=交換形）
+function getMixPortOpts() {
+  var c = AB_COMPAT[S.base + '_' + S.pipe + '_' + S.series] || { ST:[], EL:[], K:[] };
+  var out = [];
+  function mm(cc) { var d = AB_SIZE_DEF[cc]; return d ? d.mmLabel : cc; }
+  function inch(cc) { var d = AB_SIZE_DEF[cc]; return d ? d.inchLabel : ''; }
+  if (S.abCode === 'M') {
+    (c.K || []).forEach(function(cc){ out.push({ v:'K'+cc, l:'K'+cc+'('+mm(cc)+')' }); });
+    (c.K || []).forEach(function(cc){ var d = AB_SIZE_DEF[cc]; if (d && d.inchCode) out.push({ v:'K'+d.inchCode, l:'K'+d.inchCode+'('+inch(cc)+')' }); });
+  } else if (S.abCode === 'LM') {
+    (c.EL || []).forEach(function(cc){ out.push({ v:'L'+cc.slice(1), l:'L'+cc.slice(1)+'(上'+mm(cc)+')' }); });
+    (c.EL || []).forEach(function(cc){ out.push({ v:'B'+cc.slice(1), l:'B'+cc.slice(1)+'(下'+mm(cc)+')' }); });
+    (c.EL || []).forEach(function(cc){ if (elbowInchOk(cc)) out.push({ v:'L'+AB_SIZE_DEF[cc].inchCode, l:'L'+AB_SIZE_DEF[cc].inchCode+'(上'+inch(cc)+')' }); });
+    (c.EL || []).forEach(function(cc){ if (elbowInchOk(cc)) out.push({ v:'B'+AB_SIZE_DEF[cc].inchCode, l:'B'+AB_SIZE_DEF[cc].inchCode+'(下'+inch(cc)+')' }); });
+  } else {
+    (c.ST || []).forEach(function(cc){ out.push({ v:cc, l:cc+'('+mm(cc)+')' }); });
+    (c.ST || []).forEach(function(cc){ var d = AB_SIZE_DEF[cc]; if (d && d.inchCode) out.push({ v:d.inchCode, l:d.inchCode+'('+inch(cc)+')' }); });
+  }
+  return out;
+}
+
 // Cコード+方向+単位 → 実際の品番コード
 function getAbActualCode(cCode, dir, unit) {
   const sz = cCode.replace('C',''); // '4'|'6'|'8' etc.
@@ -1377,8 +1415,8 @@ function getAbActualCode(cCode, dir, unit) {
      SY3000/SY5000はエルボのインチ表記が成立する組合せを確認済み（口径ごとの詳細は次回監査で要確認）。 */
   /* v20: SY5000 のエルボは C4 相当（LN3/BN3）にインチが無い（THREES SS5Y-10 の禁止ルール、品番確認 SS5Y5-10F1-02U-LN3/-BN3=NG、
      LN7/BN9=OK。SY3000 の LN3 は OK） */
-  const elbowNoInch = (S.series === '7') || (S.series === '5' && cCode === 'C4');
-  const inchOk = unit === 'inch' && def && def.inchCode && !elbowNoInch;
+  /* v21: SY7000 のエルボでも ø3/8"（C10 相当）は LN11/BN11 がある（カタログ p.430、品番確認 SS5Y7-10F1-05U-LN11/-BN11=OK、LN9=NG） */
+  const inchOk = unit === 'inch' && elbowInchOk(cCode);
   if (dir === 'ST') {
     return unit === 'inch' && def && def.inchCode ? def.inchCode : cCode;
   } else if (dir === 'EL_UP') {
@@ -1407,7 +1445,9 @@ function getWiringLimits() {
   }
   if (w === 'ex120') return { sol: 16, st: 16 };
   if (w === 'ex126') return { sol: 16, st: 16 };
-  if (w === 'ex180') return S.ex180Pts === '16' ? { sol: 16, st: 16 } : { sol: 32, st: 16 };
+  // v21: 32点出力は配列指定で2〜24連（ソレノイド32まで）。ダブル配線は16連まで（カタログ p.557 y バルブ連数）。
+  //   品番確認 2026-10-12: SS5Y3-10S8Q2-24B-C6・-17B=OK／16点出力 SS5Y3-10S8Q3-17B-C6=NG
+  if (w === 'ex180') return S.ex180Pts === '16' ? { sol: 16, st: 16 } : { sol: 32, st: 24 };
   if (w === 'ex260') return S.ex260Pts === '16' ? { sol: 16, st: 16 } : { sol: 32, st: 24 };
   if (w === 'ex250') {
     // AS-Interface はソレノイド数制限あり
@@ -1959,7 +1999,7 @@ function setPipe(v) {
   S.pipe = v;
   S.wiring = null;
   S.connUpperPePort = null;  // P,Eポートサイズをリセット
-  S.abPipeType = null; S.abDir = null; S.abCode = null; S.abUnit = 'mm';
+  S.abPipeType = null; S.abDir = null; S.abCode = null; S.abUnit = 'mm'; S.abFitKind = '';
   S.peFittingUnit = 'mm'; S.peFittingDir = null; // A,Bポートもリセット
   ['横配管','裏配管','上配管'].forEach(x => {
     const id = {'横配管':'yoko','裏配管':'ura','上配管':'ue'}[x];
@@ -3795,7 +3835,7 @@ function getValvePN(idx) {
   // カタログ実例: SY3100-5U1 / SY3201-5U1(メタル) / SY3200R-5U1(外部) / SY3130-5U1-C6(上配管)
   var sw = getSwitchCode(st);
   var isUpper = (pipe === '上配管');
-  var isMixed = (S.abCode === 'CM' || S.abCode === 'LM');
+  var isMixed = isAbMix();
   var pCode = isUpper ? '3' : '0';
   var pilotSfx = (spec.pilot === 'R') ? 'R' : '';
   var base = 'SY' + series + sw + pCode + (spec.seal||'0') + pilotSfx
@@ -4063,7 +4103,7 @@ function deriveLampCode(lampLamp, lampSurge, lampCommon) {
 function veNormalSpecRows(idx, spec) {
   var isRubber = (spec.seal !== '1');
   var isUpper  = (S.pipe === '上配管');
-  var isMixed  = (S.abCode === 'CM' || S.abCode === 'LM');
+  var isMixed  = isAbMix();
   var series   = S.series;
   var html = '<div class="ve-sttl">バルブ仕様</div>';
   html += '<div class="ve-note" style="margin-bottom:4px;">電圧・ランプ/サージ・取付ねじは一括設定のみ。シール・マニュアルは個別変更可。</div>';
@@ -4081,7 +4121,7 @@ function veNormalSpecRows(idx, spec) {
     {v:'',l:'NL'},{v:'D',l:'D(ドライバ)'},{v:'E',l:'E(手動)'},{v:'F',l:'F(スライド)'}
   ], spec.manual||'');
   if (isUpper || isMixed) {
-    var mixLabel = isMixed ? ('A,Bポート口径（' + (S.abCode==='CM'?'ストレート':'エルボ') + '個別設定）') : 'A,Bポート口径';
+    var mixLabel = isMixed ? ('A,Bポート口径（' + (S.abCode==='LM'?'エルボ':S.abCode==='M'?'交換形':'ストレート') + '個別設定）') : 'A,Bポート口径';
     html += '<div class="ve-sttl">' + mixLabel + '</div>';
     var portOpts = [];
     if (series==='3') portOpts=[
@@ -4099,12 +4139,14 @@ function veNormalSpecRows(idx, spec) {
       {v:'02',l:'02(Rc1/4)'},{v:'C8',l:'C8(φ8)'},{v:'C10',l:'C10(φ10)'},{v:'C12',l:'C12(φ12)'},
       {v:'N9',l:'N9(φ5/16")'},{v:'N11',l:'N11(φ3/8")'}
     ];
+    // v21: 口径混合（横・裏配管）の連別口径はベース側の継手。上配管バルブ用の M5/01/02 は無く、LM はエルボ、金属 M は交換形
+    if (isMixed && !isUpper) portOpts = getMixPortOpts();
     html += veBtnRow(idx,'portSize','A,B口径', portOpts, spec.portSize||'');
     // v13: ワンタッチ継手径(C#/N#/L#/B#)とM5にはねじ種類記号(F/N/T)を付けない。
     // 実在するのは「ねじ口径」(series5=01/series7=02)のみ（品番確認で実証:
     //   SY3130-5U1-C6=OK/-C6N=NG、SY5130-5U1-01N=OK）。series3にはねじ口径の選択肢自体が無い。
     var isScrewPort = (spec.portSize==='01' || spec.portSize==='02');
-    html += veBtnRow(idx,'portScrew','A,Bポートねじ',[
+    if (isUpper) html += veBtnRow(idx,'portScrew','A,Bポートねじ',[
       {v:'',l:'Rc（無記号）'},{v:'F',l:'G（F）',ok:isScrewPort},{v:'N',l:'NPT（N）',ok:isScrewPort},{v:'T',l:'NPTF（T）',ok:isScrewPort}
     ], spec.portScrew||'', isScrewPort?null:'※ねじ種類はねじ口径(01/02)のみ選択可（ワンタッチ継手・M5には無し）');
   }
@@ -4372,7 +4414,7 @@ function veSet(idx, field, value) {
     spec.lamp = deriveLampCode(spec.lampLamp, spec.lampSurge, spec.lampCommon);
   }
   // 上配管またはCM/LMのportSize変更時はStep 8の一覧も更新
-  if ((field === 'portSize' || field === 'portScrew') && (S.pipe === '上配管' || S.abCode === 'CM' || S.abCode === 'LM')) {
+  if ((field === 'portSize' || field === 'portScrew') && (S.pipe === '上配管' || isAbMix())) {
     renderAbPortBody();
     updatePN();
   }
@@ -5462,7 +5504,7 @@ function buildPN() {
 
   // 上配管形・口径混合(CM/LM)はバルブ品番側にA,Bポート口径が必要（未設定だと SY5130-51--- のような
   // プレースホルダ品番になり手配できない）→ 全バルブ分の設定を確定条件に含める
-  if (S.pipe === '上配管' || S.abCode === 'CM' || S.abCode === 'LM') {
+  if (S.pipe === '上配管' || isAbMix()) {
     for (var pvi = 0; pvi < (S.valveCount || 0); pvi++) {
       var pvt = S.valveTypes[pvi] || 'single';
       if (pvt === 'blank') continue;
@@ -5693,7 +5735,14 @@ function renderAbPortBody() {
       //   SS5Y5-50S5N-04D-C4=NG。dsubのSS5Y5-50F1-05D-C4はOK＝配線方式固有の制約）
       if (S.base === 'metal' && S.series === '5' && S.wiring === 'ex510') available = available.filter(c => c !== 'C4');
       // v13: SY7000はエルボにインチ表記が無い（getAbActualCode参照）→ UIのミリ/インチ切替自体を出さない
-      const hasInch = available.some(c => AB_SIZE_DEF[c] && AB_SIZE_DEF[c].inchCode) && !(isEL && S.series === '7');
+      // v21: 金属ベースは固定形(C/N)・交換形(KC/KN)を選ぶ
+      const isK = S.base === 'metal' && !isEL && S.abFitKind === 'K';
+      if (S.base === 'metal' && !isEL && (compat.K || []).length) {
+        html += `<div style="display:flex;gap:4px;margin-bottom:6px;">` + [['', '固定形 (C/N)'], ['K', '交換形 (KC/KN)']].map(([v, l]) =>
+          `<div onclick="setAbFitKind('${v}')" style="flex:1;border:1.5px solid ${(S.abFitKind||'')===v?'var(--blue)':'var(--border)'};border-radius:4px;padding:4px;cursor:pointer;text-align:center;background:${(S.abFitKind||'')===v?'#ebf3ff':'#fff'};font-size:10px;font-weight:700;color:${(S.abFitKind||'')===v?'var(--blue)':'var(--text)'};">${l}</div>`).join('') + `</div>`;
+      }
+      if (isK) available = compat.K;
+      const hasInch = available.some(c => isEL ? elbowInchOk(c) : (AB_SIZE_DEF[c] && AB_SIZE_DEF[c].inchCode));
       const unit = S.abUnit || 'mm';
       const sizeTitle = (hasPush && hasScrew) ? '③ サイズ（管径）' : '② サイズ（管径）';
       html += `<div style="font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:.1em;font-family:var(--mono);margin-bottom:4px;">${sizeTitle}</div>`;
@@ -5706,8 +5755,8 @@ function renderAbPortBody() {
       html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">`;
       available.forEach(cCode => {
         const def = AB_SIZE_DEF[cCode];
-        const actualCode = getAbActualCode(cCode, S.abDir, unit);
-        const noInch = unit === 'inch' && (!def || !def.inchCode || (isEL && S.series === '5' && cCode === 'C4'));   /* v20: SY5000 エルボ C4 はインチなし */
+        const actualCode = (isK ? 'K' : '') + getAbActualCode(cCode, S.abDir, unit);
+        const noInch = unit === 'inch' && (isEL ? !elbowInchOk(cCode) : (!def || !def.inchCode));   /* v20: SY5000 エルボ C4・v21: SY7000 エルボは C10 のみインチ */
         const sel = S.abCode === actualCode;
         html += `<div onclick="${noInch?'':('setAbCode(\''+actualCode+'\')')}"
           style="border:1.5px solid ${sel?'var(--blue)':noInch?'#e8ecf4':'var(--border)'};border-radius:6px;
@@ -5735,8 +5784,12 @@ function renderAbPortBody() {
   // ── CM / LM（口径混合）選択肢 ──
   if (hasPush) {
     const cmOpts = [];
-    if (compat.ST.length > 0) cmOpts.push({ v:'CM', label:'CM', sub:'ストレート口径混合' });
-    if (compat.EL.length > 0) cmOpts.push({ v:'LM', label:'LM', sub:'エルボ口径混合（上向き・下向き含む）' });
+    if (S.base === 'metal') {
+      if ((compat.K || []).length > 0) cmOpts.push({ v:'M', label:'M', sub:'口径混合（交換形継手のみ）' });
+    } else {
+      if (compat.ST.length > 0) cmOpts.push({ v:'CM', label:'CM', sub:'ストレート口径混合' });
+      if (compat.EL.length > 0) cmOpts.push({ v:'LM', label:'LM', sub:'エルボ口径混合（上向き・下向き含む）' });
+    }
     if (cmOpts.length > 0) {
       html += `<div style="font-size:9px;color:#94a3b8;margin:8px 0 4px;font-weight:700;letter-spacing:.08em;font-family:var(--mono);">口径混合タイプ</div>`;
       html += `<div style="display:flex;flex-direction:column;gap:3px;">`;
@@ -5755,7 +5808,7 @@ function renderAbPortBody() {
       });
       html += `</div>`;
       // CM/LM選択時の案内
-      if (S.abCode === 'CM' || S.abCode === 'LM') {
+      if (isAbMix()) {
         html += `<div style="margin-top:8px;background:rgba(45,123,212,.08);border:1px solid rgba(45,123,212,.25);border-radius:5px;padding:8px 10px;font-size:9px;color:var(--blue2);line-height:1.6;">
           ℹ バルブごとに管継手の設定が可能です。<br>
           各バルブをクリックして編集パネルでA,Bポート口径を設定してください。
@@ -5885,6 +5938,12 @@ function renderPeFittingSection() {
 function setAbDir(v) {
   S.abDir = v;
   S.abCode = null; // reset size on direction change
+  renderAbPortBody();
+  updatePN();
+}
+function setAbFitKind(v) {
+  S.abFitKind = v;
+  S.abCode = null;
   renderAbPortBody();
   updatePN();
 }
@@ -6625,7 +6684,7 @@ function parseManifoldPN(raw) {
     if (!sm) return { ok: false, error: '連数以降を解釈できません: ' + rest };
     var epErr2 = applyEport(sm[1] || 'U');
     if (epErr2) return { ok: false, error: epErr2 };
-    var pm = sm[2].match(/^(C\d+|CM|LM|LN?\d+|BN?\d+|N\d+|M5|0[123])?([FN]?)(AA|BA|[ABD]\d*)?$/);
+    var pm = sm[2].match(/^(C\d+|CM|LM|K[CN]\d+|LN?\d+|BN?\d+|N\d+|M5|M|0[123])?([FN]?)(AA|BA|[ABD]\d*)?$/);
     if (!pm || (sm[2] && !pm[0])) return { ok: false, error: '口径/取付コードを解釈できません: ' + sm[2] };
     if (pm[1]) {
       if (base === 'mixed' && /^C\d{2,3}$/.test(pm[1]) && pm[1] !== 'CM') {
@@ -6635,6 +6694,11 @@ function parseManifoldPN(raw) {
         if (digits.length === 3) { big = digits.slice(0, 2); small = digits.slice(2); }
         else { big = digits.charAt(0); small = digits.charAt(1); }
         S.mixBig = big; S.mixSmall = small; S.abCode = pm[1];
+      } else if (/^K[CN]\d+$/.test(pm[1])) {
+        // v21: 金属ベースの交換形ワンタッチ管継手
+        if (typeof setAbPipeType === 'function') setAbPipeType('push');
+        S.abDir = 'ST'; S.abFitKind = 'K'; S.abUnit = pm[1].charAt(1) === 'N' ? 'inch' : 'mm';
+        S.abCode = pm[1];
       } else if (/^(L|B)N?\d/.test(pm[1])) {
         // エルボ口径（L=上向き/B=下向き）
         if (typeof setAbPipeType === 'function') setAbPipeType('push');
@@ -6644,7 +6708,7 @@ function parseManifoldPN(raw) {
       } else {
         if (typeof setAbPipeType === 'function') setAbPipeType('st');
         setAbCode(pm[1]);
-        if (pm[1] === 'CM' || pm[1] === 'LM') notes.push('口径混合(' + pm[1] + '): 各バルブの口径はバルブ品番側で反映されます');
+        if (pm[1] === 'CM' || pm[1] === 'LM' || pm[1] === 'M') notes.push('口径混合(' + pm[1] + '): 各バルブの口径はバルブ品番側で反映されます');
       }
     }
     if (pm[2] && base === 'metal' && typeof setSubScrew === 'function') setSubScrew(pm[2]);
@@ -6976,7 +7040,7 @@ function getMissingItems() {
   }
   if (S.series && S.base && S.pipe && getMountCode() === null) add('取付方法', 9);
   // 上配管形・口径混合(CM/LM)はバルブ連別のA,Bポート口径が必要
-  if (S.pipe === '上配管' || S.abCode === 'CM' || S.abCode === 'LM') {
+  if (S.pipe === '上配管' || isAbMix()) {
     for (var mvi = 0; mvi < (S.valveCount || 0); mvi++) {
       var mvt = S.valveTypes[mvi] || 'single';
       if (mvt === 'blank') continue;
@@ -7086,9 +7150,18 @@ function sanitizeAllValves() {
   if (S.base !== 'mixed') {
     var abKey = S.base + '_' + S.pipe + '_' + S.series;
     var cmp = AB_COMPAT[abKey];
-    if (cmp && S.abCode && S.abCode !== 'CM' && S.abCode !== 'LM') {
+    // v21: 金属ベースの口径混合は M（CM/LM は無い）、M はコネクタベースに無い
+    if (S.base === 'metal' && (S.abCode === 'CM' || S.abCode === 'LM')) S.abCode = null;
+    if (S.base !== 'metal' && S.abCode === 'M') S.abCode = null;
+    if (cmp && S.abCode && !isAbMix()) {
       var validAb = (cmp.ST || []).concat(cmp.EL || [], cmp.SCREW || []);
       if (/^(C\d+|M5|0\d)$/.test(S.abCode) && validAb.indexOf(S.abCode) < 0) S.abCode = null;
+      // 交換形 KC□/KN□ は金属ベースの K 一覧にあるときだけ
+      var km = S.abCode && S.abCode.match(/^K([CN])(\d+)$/);
+      if (km) {
+        var kOk = (cmp.K || []).some(function(cc){ return km[1] === 'C' ? cc === 'C' + km[2] : (AB_SIZE_DEF[cc] && AB_SIZE_DEF[cc].inchCode === 'N' + km[2]); });
+        if (!kOk) S.abCode = null;
+      }
     }
   }
   // v13: SY5000金属ベース×EX510はC4が不成立（品番確認で実証。renderAbPortBodyのUI制限と対の防御的補正）
@@ -7834,8 +7907,9 @@ function renderSVG(noRecenter) {
     var abNote = 'A,B: ' + S.abCode;
     if (/^L/.test(S.abCode) && S.abCode !== 'LM') abNote += '（エルボ上向き）';
     else if (/^B\d/.test(S.abCode)) abNote += '（エルボ下向き）';
+    else if (/^K/.test(S.abCode)) abNote += '（交換形' + (/^KN/.test(S.abCode) ? '・インチ' : '') + '）';
     else if (/N\d/.test(S.abCode)) abNote += '（インチ）';
-    else if (S.abCode === 'CM' || S.abCode === 'LM') abNote += '（口径混合・仕様書指示）';
+    else if (isAbMix()) abNote += '（口径混合・仕様書指示）';
     p.push(JTx(BX+BW+4, PORT_Y+PORT_H-3, abNote, 5.5, C.abPort, 'start'));
   }
 
@@ -8448,7 +8522,7 @@ function exportEditorJSON() {
 function resetAll() {
   _valveEverClicked = false;
   _touchedValves = new Set();
-  Object.assign(S, {series:null,base:null,pipe:null,wiring:null,connType:null,connDir:null,leadNum:null,leadLen:null,wirelessType:null,wirelessNum:null,wirelessPnp:false,ex500Si:null,ex510Si:null,ex510N:null,ex510S:null,metalFlatS:null,ex600Si:null,ex600Io:null,ex600IoPolar:null,ex600IoCount:null,ex600IoUnits:[],ex245Si:null,ex245Io:null,ex245IoMod:null,ex250Si:null,ex250Io:null,ex250Spec:null,ex260Si:null,ex260Pts:null,ex260Polar:null,ex260Conn:null,ex126Si:null,ex120Si:null,ex120Proto:null,ex180Si:null,ex180Pts:null,ex180Conn:null,ex180PolarSel:null,subScrew:'',eportPilot:'int',eportAssy:'',metalPePort:'',connUpperPePort:null,mixBig:'',mixSmall:'',abPipeType:null,abDir:null,abCode:null,abUnit:'mm',peFittingUnit:'mm',peFittingDir:null,mountMethod:null,mountPlate:false,mountPrint:false,mountDinLen:null,manifestOpts:{},silencerSide:null,connCableLen:'030',connCableInch:false,plugTarget:null,backpressAssyAll:false,valveCount:2,valveTypes:[],valveSpecs:[],bulkSpec:null});
+  Object.assign(S, {series:null,base:null,pipe:null,wiring:null,connType:null,connDir:null,leadNum:null,leadLen:null,wirelessType:null,wirelessNum:null,wirelessPnp:false,ex500Si:null,ex510Si:null,ex510N:null,ex510S:null,metalFlatS:null,ex600Si:null,ex600Io:null,ex600IoPolar:null,ex600IoCount:null,ex600IoUnits:[],ex245Si:null,ex245Io:null,ex245IoMod:null,ex250Si:null,ex250Io:null,ex250Spec:null,ex260Si:null,ex260Pts:null,ex260Polar:null,ex260Conn:null,ex126Si:null,ex120Si:null,ex120Proto:null,ex180Si:null,ex180Pts:null,ex180Conn:null,ex180PolarSel:null,subScrew:'',eportPilot:'int',eportAssy:'',metalPePort:'',connUpperPePort:null,mixBig:'',mixSmall:'',abPipeType:null,abDir:null,abCode:null,abUnit:'mm',abFitKind:'',peFittingUnit:'mm',peFittingDir:null,mountMethod:null,mountPlate:false,mountPrint:false,mountDinLen:null,manifestOpts:{},silencerSide:null,connCableLen:'030',connCableInch:false,plugTarget:null,backpressAssyAll:false,valveCount:2,valveTypes:[],valveSpecs:[],bulkSpec:null});
   document.querySelectorAll('.chip,.wc,.sub-chip').forEach(e=>e.classList.remove('active','wc-active'));
   [1,2,3,4,5,6,7,8,9].forEach(n=>{markStep(n,''); var sv=document.getElementById('sv'+n); if(sv) sv.textContent='—';});
   document.getElementById('step5-wrap').style.display='none';
@@ -9181,7 +9255,7 @@ async function fillOfficialSpecForm(file) {
         if (rWire) W(st.col + rWire, vt === 'single' ? '1' : '2');
         // マニホールド側 A,B口径: 口径混合(CM/LM)は連ごとの口径、単一口径は共通値（上配管形はマニホールド側の口径なし）
         if (rGport && S.pipe !== '上配管' && S.abCode) {
-          var gv = (S.abCode === 'CM' || S.abCode === 'LM') ? (spec.portSize || '') : S.abCode;
+          var gv = isAbMix() ? (spec.portSize || '') : S.abCode;
           if (gv) { W(st.col + rGport, gv); W(st.col + (rGport + 1), gv); }
         }
         // バルブ型式側 A,B口径: 上配管形マニホールドのバルブ口径（バルブ品番の口径記号＋ねじ種類）

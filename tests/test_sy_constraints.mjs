@@ -57,11 +57,11 @@ new Function(
  __ex.getEportStationMax=getEportStationMax; __ex.getWiringLimits=getWiringLimits;
  __ex.getMountCode=getMountCode; __ex.getAbActualCode=getAbActualCode; __ex.AB_COMPAT=AB_COMPAT;
  __ex.getValveSpec=getValveSpec; __ex.veSet=veSet; __ex.renderAbPortBody=renderAbPortBody;
- __ex.updateMetalPeWrap=updateMetalPeWrap;`
+ __ex.updateMetalPeWrap=updateMetalPeWrap; __ex.getMixPortOpts=getMixPortOpts; __ex.parseManifoldPN=parseManifoldPN;`
 )(globalThis.document, globalThis.window, globalThis.alert, globalThis.localStorage,
   globalThis.navigator, globalThis.XLSX, globalThis.FileReader, globalThis.Blob, globalThis.URL, ex);
 
-const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed, getEportStationMax, getWiringLimits, getMountCode, getAbActualCode, AB_COMPAT, getValveSpec, veSet, renderAbPortBody, updateMetalPeWrap } = ex;
+const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed, getEportStationMax, getWiringLimits, getMountCode, getAbActualCode, AB_COMPAT, getValveSpec, veSet, renderAbPortBody, updateMetalPeWrap, getMixPortOpts } = ex;
 const S0 = JSON.parse(JSON.stringify(S));
 
 let pass = 0, fail = 0;
@@ -339,7 +339,7 @@ console.log('════ v20) 金属ベース・EX510 のオールシングル 
   ck('v20 EX510 オールダブルは8連まで', getWiringLimits().st, 8);
 }
 
-console.log('════ v13 H) SY7000はエルボ継手にインチ表記(LN#/BN#)が実在しない ════');
+console.log('════ v13 H) SY7000はエルボ継手にインチ表記(LN#/BN#)が実在しない（v21: C10=LN11/BN11 だけは実在） ════');
 {
   S.series = '7';
   ck('v13 H: SY7000エルボ上向きミリ(L6)は成立', getAbActualCode('C6','EL_UP','mm'), 'L6');
@@ -381,5 +381,43 @@ console.log('════ v13 副産物) SY5000金属ベース×EX510はA,Bポ�
   ck('v13 副産物対照: dsub配線ではC4は維持される(既存動作)', S.abCode, 'C4');
 }
 
+console.log('════ v21) EX180 32点出力は配列指定で24連まで ════');
+{
+  // カタログ p.557: 32点出力=ダブル配線2〜16連／配列指定2〜24連（ソレノイド32まで）。品番確認 SS5Y3-10S8Q2-24B-C6=OK／SS5Y3-10S8Q3-17B-C6=NG
+  mkValve({ series:'3', base:'conn', pipe:'横配管', wiring:'ex180', count:2, eport:'B', abCode:'C6' });
+  S.ex180Pts = '32';
+  ck('v21 EX180 32点出力の連数上限は24', getWiringLimits().st, 24);
+  ck('v21 EX180 32点出力のソレノイド上限は32', getWiringLimits().sol, 32);
+  S.ex180Pts = '16';
+  ck('v21 EX180 16点出力の連数上限は16', getWiringLimits().st, 16);
+}
+console.log('════ v21) 金属ベースの交換形 KC/KN・口径混合 M／SY7000 エルボ L12・LN11／口径混合の連別口径 ════');
+{
+  // カタログ p.636・品番確認 2026-10-12: SS5Y3-50F1-05U-KC6・SS5Y7-50F1-05U-KC12・-KN7・SS5Y5-51F1-05D-M=OK／SS5Y3-50F1-05U-CM=NG
+  mkValve({ series:'3', base:'metal', pipe:'横配管', wiring:'dsub', metalFlatS:'', count:5, eport:'U', abCode:'KC6', abPipeType:'push', abDir:'ST' });
+  ck('v21 金属50型 交換形 KC6', pn(), 'SS5Y3-50F1-05U-KC6');
+  mkValve({ series:'7', base:'metal', pipe:'横配管', wiring:'dsub', metalFlatS:'', count:5, eport:'U', abCode:'KC12', abPipeType:'push', abDir:'ST' });
+  ck('v21 金属SY7000 交換形 KC12（固定形C12は無い）', pn(), 'SS5Y7-50F1-05U-KC12');
+  mkValve({ series:'7', base:'metal', pipe:'横配管', wiring:'dsub', metalFlatS:'', count:5, eport:'U', abCode:'KC4', abPipeType:'push', abDir:'ST' });
+  ck('v21 金属SY7000 に KC4 は無い→未選択に戻る', (pn(), S.abCode), null);
+  mkValve({ series:'5', base:'metal', pipe:'裏配管', wiring:'dsub', metalFlatS:'', count:5, eport:'D', abCode:'M', abPipeType:'push' });
+  ck('v21 金属51型の口径混合は M', (sanitizeAllValves(), S.abCode), 'M');
+  ck('v21 金属 M の連別口径は交換形のみ', getMixPortOpts().map(o=>o.v).join(','), 'KC4,KC6,KC8,KN3,KN7,KN9');
+  mkValve({ series:'3', base:'metal', pipe:'横配管', wiring:'dsub', metalFlatS:'', count:5, eport:'U', abCode:'CM', abPipeType:'push' });
+  ck('v21 金属ベースに CM は無い→未選択に戻る', (pn(), S.abCode), null);
+  S.series = '7';
+  ck('v21 SY7000 エルボ C10 はインチ LN11', getAbActualCode('C10','EL_UP','inch'), 'LN11');
+  ck('v21 SY7000 エルボ C10 下向きインチ BN11', getAbActualCode('C10','EL_DN','inch'), 'BN11');
+  ck('v21 SY7000 エルボ C12 は L12', getAbActualCode('C12','EL_UP','mm'), 'L12');
+  ck('v21 SY7000 10型エルボに C12 がある', AB_COMPAT['conn_横配管_7'].EL.indexOf('C12') >= 0, true);
+  mkValve({ series:'3', base:'conn', pipe:'横配管', wiring:'dsub', count:3, eport:'U', abCode:'CM', abPipeType:'push' });
+  ck('v21 SY3000 CM の連別口径（M5・ねじなし）', getMixPortOpts().map(o=>o.v).join(','), 'C2,C3,C4,C6,N1,N3,N7');
+  S.abCode = 'LM';
+  ck('v21 SY3000 LM の連別口径はエルボ', getMixPortOpts().map(o=>o.v).join(','), 'L4,L6,B4,B6,LN3,LN7,BN3,BN7');
+  S.series = '5';
+  ck('v21 SY5000 LM（C4 インチなし）', getMixPortOpts().map(o=>o.v).join(','), 'L4,L6,L8,B4,B6,B8,LN7,LN9,BN7,BN9');
+  S.series = '7';
+  ck('v21 SY7000 LM（インチは LN11/BN11 のみ）', getMixPortOpts().map(o=>o.v).join(','), 'L6,L8,L10,L12,B6,B8,B10,B12,LN11,BN11');
+}
 console.log(`結果: ${pass} passed / ${fail} failed`);
 process.exit(fail ? 1 : 0);
