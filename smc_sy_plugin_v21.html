@@ -6627,6 +6627,11 @@ function _applyWiringCode(code) {
 function parseManifoldPN(raw) {
   var pn = _pnNormalize(raw);
   if (!pn) return { ok: false, error: 'マニホールド品番が空です' };
+  // v21: 金属ベースの外部パイロット（型式側 R: 50R/52R）と、v20 からのオールシングル S（連数の前: -S05D）を先に外す
+  var metalExtR = false, metalAllS = false, mR = pn.match(/^(SS5Y[357]-5[02])R(.*)$/);
+  if (mR) { pn = mR[1] + mR[2]; metalExtR = true; }
+  var mS = pn.match(/^(SS5Y[357]-5[012][A-Z0-9]*-)S(\d{2}.*)$/);
+  if (mS) { pn = mS[1] + mS[2]; metalAllS = true; }
   var m = pn.match(/^SS5Y([357])-(M1[012]|5[012]|1[012])([A-Z0-9]*?)-(\d{2})(.*)$/);
   if (!m) return { ok: false, error: '品番形式を解釈できません: ' + pn + '（例: SS5Y3-10F2-05U-C6）' };
   var notes = [];
@@ -6640,6 +6645,7 @@ function parseManifoldPN(raw) {
   var wres = _applyWiringCode(m[3]);
   if (!wres) return { ok: false, error: '配線方式コードを解釈できません: 「' + m[3] + '」' };
   if (wres && wres.note) notes.push(wres.note);
+  if (metalAllS) { if (S.wiring === 'ex510') setEx510S('S'); else if (typeof setMetalFlatS === 'function') setMetalFlatS('S'); else S.metalFlatS = 'S'; }
   var cnt = parseInt(m[4], 10);
   if (cnt < 2 || cnt > 24) return { ok: false, error: '連数が範囲外です: ' + m[4] };
   S.valveCount = cnt;
@@ -6731,6 +6737,7 @@ function parseManifoldPN(raw) {
     if (pm[2] && base === 'metal' && typeof setSubScrew === 'function') setSubScrew(pm[2]);
     applyMount(pm[3] || '');
   }
+  if (metalExtR) setEportAssy('R');
   updateAll();
   return { ok: true, notes: notes };
 }
@@ -9019,7 +9026,28 @@ async function fillOfficialSpecForm(file) {
     var tm = (title || '').match(/SS5Y(\d)[-ー−]([A-Z0-9]+)/);
     if (!tm) { alert('SMC公式マニホールド仕様書（SS5Y□-□□）として認識できませんでした。\nタイトル: ' + (title || '不明')); return; }
     var typeCode = (res.segs.find(function(s){ return s.key === '型式+配線'; }) || {}).val || '';
-    if (tm[1] !== S.series || typeCode.indexOf(tm[2]) !== 0) {
+    // v21: 照合を厳密化（先頭一致だけだと P の仕様書に PG、T（TCの仕様書は無い）に TC、EX250 と EX260 の取り違えを
+    //   受け付けていた。逆に「L1/L2/L3」のように併記されたタイトルで L2/L3 を拒否していた）
+    function _tplMatch() {
+      if (tm[1] !== S.series) return false;
+      var tn = _nz(title);
+      var am = tn.match(/SS5Y\d[-ー−]((?:M)?\d\d)([A-Z0-9]*(?:\/[A-Z0-9]+)*)/);
+      if (!am) return typeCode.indexOf(tm[2]) === 0;
+      var pre = am[1];
+      var alts = am[2].split('/').map(function(x){ return pre + x; });
+      var tc = typeCode.replace(/^(5[02])R/, '$1');   // 金属ベースの外部パイロット R は型式ボックスの枠に入る
+      return alts.some(function(a){
+        if (tc.indexOf(a) !== 0) return false;
+        var nx = tc.charAt(a.length);
+        if (/^(M?\d\d)S$/.test(a)) {                   // シリアル S: タイトルの EX 番号で照合
+          var ex = tn.match(/EX(\d{3})/);
+          if (tc === a + '0') return true;               // SIユニットなし S0 は EX250/EX500 等で共通の品番
+          return !ex || S.wiring === 'ex' + ex[1];
+        }
+        return !(/[A-Z]$/.test(a) && /[A-Z]/.test(nx));  // 末尾が英字なら次も英字＝別の配線（PG/PH/TC/FW）
+      });
+    }
+    if (!_tplMatch()) {
       _ofmStatus('✗ テンプレート不一致: このファイルは SS5Y' + tm[1] + '-' + tm[2] + ' 用です（現在の選定: SS5Y' + S.series + '-' + typeCode + '）', false);
       alert('テンプレートと選定内容が一致しません。\n・テンプレート: SS5Y' + tm[1] + '-' + tm[2]
         + '\n・現在の選定: SS5Y' + S.series + '-' + typeCode
@@ -9158,7 +9186,9 @@ async function fillOfficialSpecForm(file) {
     var hdrRow = dRefs.length ? rowNum(dRefs[0]) : 0;
     // ラベル探索は仕様欄の左側（D側の列より左）に限る＝右頁の凡例・注記の同名語を拾わない
     var labelColMax = dRefs.length ? _colToNum(colOf(dRefs[0])) : 9999;
-    function _inLabelArea(r){ return _colToNum(colOf(r)) < labelColMax; }
+    // v21: 仕様欄の見出し（D側の行）より上の注記文（「５）SUP.ストップ弁スペーサAss'y、背圧防止弁Ass'y…」
+    //   「２）ブランキングプレートを選択の際は、切換方式の欄に…」）は同じ語を含むので対象外にする
+    function _inLabelArea(r){ return _colToNum(colOf(r)) < labelColMax && (!hdrRow || rowNum(r) > hdrRow); }
     function rowOfLabel(sub, exact) {
       var ns = _nz(sub);
       var rows = keys.filter(function(r){
@@ -9183,6 +9213,11 @@ async function fillOfficialSpecForm(file) {
       return /^\d+$/.test(v) && +v >= 1 && +v <= 32;
     }).map(function(r){ return { col: colOf(r), n: parseInt(cells[r], 10) }; }).sort(function(a,b){ return a.n-b.n; });
 
+    // v21: 仕様欄の連の列が選定連数より少ない書式（例 EX500 用は16連まで）は、はみ出す連を書けないので知らせる
+    if (stCols.length && S.valveCount > stCols.length) {
+      alert('注意: この仕様書の仕様欄は' + stCols.length + '連までです（選定 ' + S.valveCount + '連）。'
+        + (stCols.length + 1) + '連目以降は記入されません。続紙などで指示してください。');
+    }
     var rI = rowOfLabel('切換方式');
     // 混載（M型）テンプレは切換方式がSY3000行/SY5000行（またはSY5000/SY7000行）の2段。
     // ツールの混載モデルは連別シリーズを持たず生成バルブ品番は選択シリーズ側のため、
@@ -9201,7 +9236,7 @@ async function fillOfficialSpecForm(file) {
     // 「(M)パイロット弁オプション」「(N)パイロットオプション」等（テンプレにより「弁」の有無が異なる）
     var rM = rowOfLabel('パイロット弁オプション') || rowOfLabel('パイロットオプション');
     var rN = rowOfLabel('コイル仕様');
-    var rWire = rowOfLabel('配線仕様', true);
+    var rWire = rowOfLabel('配線仕様', true) || rowOfLabel('配線', true);   // v21: 「配線」とだけ書いた書式もある
     // A,Bポート管接続口径の行は2種類ある（v15）:
     //   ・マニホールド側（(G)/(E,F)/(G,H)…）: 同じ行に「Aポート」、次の行に「Bポート」＝連ごとのA,B口径
     //   ・バルブ型式側（(Q,R)/(O)/(S)…）: 上配管形バルブの口径（バルブ品番の口径記号）
@@ -9327,8 +9362,9 @@ async function fillOfficialSpecForm(file) {
         if (rowBoxes[0]) { W(rowBoxes[0].c1 + sl.row, (it.noStar ? '' : '＊') + it.pn); listFilled++; }
         if (rowBoxes[1]) W(rowBoxes[1].c1 + sl.row, String(it.qty));
       });
-      if (items.length > slots.length) {
-        alert('注意: 構成製品が' + items.length + '件あり、リスト欄(' + slots.length + '行)に収まりませんでした。残りは手動で記入してください。');
+      if (listFilled < items.length) {
+        alert('注意: 構成製品が' + items.length + '件あり、リスト欄に' + listFilled + '件しか収まりませんでした。残り（'
+          + items.slice(listFilled).map(function(it){ return it.pn; }).join('、') + '）は手動で記入してください。');
       }
     }
 

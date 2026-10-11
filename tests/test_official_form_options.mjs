@@ -142,7 +142,9 @@ for (const { name, path } of found) {
     const nz = x => String(x).replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).replace(/[\s\u3000]/g, '');
     const firstRow = f => keys.filter(r => f(nz(cells[r]), r)).map(rowNum).sort((a, b) => a - b)[0] || 0;
     const dCol = keys.filter(r => nz(cells[r]) === 'D側').map(r => _colToNum(colOf(r))).sort((a, b) => a - b)[0] || 99;
-    const left = r => _colToNum(colOf(r)) < dCol;
+    // v21: 仕様欄の見出し（D側の行）より上の注記文は同じ語を含むので対象外（ツール側と同じ誤りでv20まで素通りしていた）
+    const dRow = keys.filter(r => nz(cells[r]) === 'D側').map(rowNum).sort((a, b) => a - b)[0] || 0;
+    const left = r => _colToNum(colOf(r)) < dCol && rowNum(r) > dRow;
     const rPO = firstRow((t, r) => left(r) && /パイロット弁?オプション/.test(t));
     const rBP = firstRow((t, r) => left(r) && t.indexOf("背圧防止弁Ass'y") >= 0);
     const rDS = firstRow((t, r) => left(r) && t.indexOf('SUP.ブロッキングディスク') >= 0);
