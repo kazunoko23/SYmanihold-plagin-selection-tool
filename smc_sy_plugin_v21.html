@@ -3838,10 +3838,12 @@ function getValvePN(idx) {
   /* v13: 口径混合(CM/LM)を横配管/裏配管(pCode=0)で選んだ場合、個別バルブ品番には口径記号を付けない。
      口径指定はマニホールド仕様書側の記述事項でありバルブ本体品番には現れない
      （実証: SY5100-5U1=OK / SY5100-5U1-C8=NG。上配管形(pCode=3)は付ける: SY5130-5U1-C8=OK）。 */
+  // v21: 主弁フッ素ゴム（オーダーメイド -X90・弾性体シールのみ。カタログ p.422-1）。v10〜v20 は画面で選べても品番に付いていなかった
+  var x90 = (spec.fluoroRubber && (spec.seal || '0') === '0') ? '-X90' : '';
   if (isUpper) {
-    return base + sfx + '-' + (spec.portSize||'--') + (spec.portScrew||'') + (spec.screw ? '-' + spec.screw : '');
+    return base + sfx + '-' + (spec.portSize||'--') + (spec.portScrew||'') + (spec.screw ? '-' + spec.screw : '') + x90;
   } else {
-    return base + sfx + (spec.screw ? '-' + spec.screw : '');
+    return base + sfx + (spec.screw ? '-' + spec.screw : '') + x90;
   }
 }
 

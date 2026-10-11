@@ -438,5 +438,14 @@ console.log('════ v21) EX180 DeviceNet のマイナスコモン Q4/Q5・
   S.subScrew='T'; S.mountMethod='din'; S.mountDinLen='0';
   ck('v21 52型 NPTF＋DINレールなしは -00TD0', pn(), 'SS5Y3-52F1-05U-00TD0');
 }
+console.log('════ v21) 主弁フッ素ゴム -X90 を品番に付ける（弾性体のみ） ════');
+{
+  const sp = mkValve({ series:'3', base:'conn', pipe:'横配管', wiring:'dsub', count:2, eport:'U', abCode:'C6', spec:{ fluoroRubber:true } });
+  ck('v21 -X90 付き', getValvePN(0), 'SY3100-5U1-X90');
+  sp.screw = 'B';
+  ck('v21 取付ねじBの後に -X90', getValvePN(0), 'SY3100-5U1-B-X90');
+  sp.screw = ''; sp.seal = '1';
+  ck('v21 メタルシールには付けない', getValvePN(0), 'SY3101-5U1');
+}
 console.log(`結果: ${pass} passed / ${fail} failed`);
 process.exit(fail ? 1 : 0);
