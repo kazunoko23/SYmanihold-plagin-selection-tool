@@ -419,5 +419,24 @@ console.log('════ v21) 金属ベースの交換形 KC/KN・口径混合 
   S.series = '7';
   ck('v21 SY7000 LM（インチは LN11/BN11 のみ）', getMixPortOpts().map(o=>o.v).join(','), 'L6,L8,L10,L12,B6,B8,B10,B12,LN11,BN11');
 }
+console.log('════ v21) EX180 DeviceNet のマイナスコモン Q4/Q5・金属ベースのねじ NPTF(T)・52型 00F/00N/00T ════');
+{
+  // カタログ p.557 r 表・品番確認: SS5Y3-10S8Q4-05U-C6・Q5・Q4A=OK
+  mkValve({ series:'3', base:'conn', pipe:'横配管', wiring:'ex180', count:5, eport:'U', abCode:'C6', abPipeType:'push', abDir:'ST' });
+  S.ex180Si='Q'; S.ex180Pts='16'; S.ex180PolarSel='5'; S.ex180Conn='';
+  ck('v21 EX180 DeviceNet 16点 PNP は S8Q5', pn(), 'SS5Y3-10S8Q5-05U-C6');
+  S.ex180Pts='32'; S.ex180PolarSel='4'; S.ex180Conn='A';
+  ck('v21 EX180 DeviceNet 32点 PNP ストレートは S8Q4A', pn(), 'SS5Y3-10S8Q4A-05U-C6');
+  // カタログ p.636/p.655・品番確認: SS5Y3-50F1-05U-01TD・SS5Y3-52F1-05U-00F・-00TD0=OK／-00F-D=NG
+  mkValve({ series:'3', base:'metal', pipe:'横配管', wiring:'dsub', metalFlatS:'', count:5, eport:'U', abCode:'01', abPipeType:'screw' });
+  S.subScrew='T';
+  ck('v21 金属50型 NPTF は 01T', pn(), 'SS5Y3-50F1-05U-01T');
+  mkValve({ series:'3', base:'metal', pipe:'上配管', wiring:'dsub', metalFlatS:'', count:5, eport:'U' });
+  for (let i=0;i<5;i++) getValveSpec(i).portSize='C6';
+  S.subScrew='F';
+  ck('v21 52型 G ねじは -00F', pn(), 'SS5Y3-52F1-05U-00F');
+  S.subScrew='T'; S.mountMethod='din'; S.mountDinLen='0';
+  ck('v21 52型 NPTF＋DINレールなしは -00TD0', pn(), 'SS5Y3-52F1-05U-00TD0');
+}
 console.log(`結果: ${pass} passed / ${fail} failed`);
 process.exit(fail ? 1 : 0);

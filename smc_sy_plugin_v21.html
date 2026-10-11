@@ -750,8 +750,9 @@ body{background:#e6ebf0;}
             <div class="chip active" id="ssc-rc" onclick="setSubScrew('')">Rc<small>無記号</small></div>
             <div class="chip" id="ssc-f"  onclick="setSubScrew('F')">G<small>F</small></div>
             <div class="chip" id="ssc-n"  onclick="setSubScrew('N')">NPT<small>N</small></div>
+            <div class="chip" id="ssc-t"  onclick="setSubScrew('T')">NPTF<small>T</small></div>
           </div>
-          <div style="font-size:8px;color:#94a3b8;margin-top:3px;">※口径記号の直後に連結されます（例: 01F, C6N）</div>
+          <div style="font-size:8px;color:#94a3b8;margin-top:3px;">※口径記号の直後に連結（例: 01F, C6N）。52型は 00F/00N/00T</div>
         </div>
       </div>
     </div>
@@ -1939,7 +1940,7 @@ function updateMetalPeWrap() {
   if (scw) scw.style.display = isMetal ? '' : 'none';
   if (!isMetal && S.subScrew) {
     S.subScrew = '';
-    ['rc','f','n'].forEach(function(k){
+    ['rc','f','n','t'].forEach(function(k){
       var el = document.getElementById('ssc-'+k);
       if (el) el.classList.toggle('active', k === 'rc');
     });
@@ -2968,13 +2969,14 @@ function renderConnDetail() {
     // EX180: SS5Y3-10S8[SI][conn]-05U-C6
     // SI: 0=なし, Q=DeviceNet(NPN), V=CC-Link(NPN/PNPは出力点で決定)
     // 出力点: 32点=最大24連 / 16点=最大16連
-    // CC-Link: 32点のみ(2=NPN,4=PNP)、DeviceNet: 32点(2=NPN)/16点(3=NPN)
+    // CC-Link: 32点のみ(2=NPN,4=PNP)、DeviceNet: 32点(2=NPN/4=PNP)/16点(3=NPN/5=PNP)
+    // v21: DeviceNet もマイナスコモン(PNP)あり（カタログ p.557 r 表。品番確認 SS5Y3-10S8Q4-05U-C6・Q5・Q4A=OK／V3・V5=NG）
     // 通信コネクタ: 無記号=T分割型 / A=ストレート型（SIなし時はコネクタブロックAss'yのみ）
 
     // SI仕様データ
     var ex180SiData = [
       { code:'0', proto:'SIユニットなし',  polar:null,  pts:null,    conn:false, note:'コネクタブロックAss\'yのみ付属' },
-      { code:'Q', proto:'DeviceNet®',      polar:'N',   pts:'both',  conn:true,  note:'プラスコモン（NPN）' },
+      { code:'Q', proto:'DeviceNet®',      polar:'both',pts:'both',  conn:true,  note:'プラスコモン(NPN) / マイナスコモン(PNP)' },
       { code:'V', proto:'CC-Link',         polar:'both',pts:'32',    conn:true,  note:'プラスコモン(NPN) / マイナスコモン(PNP)' },
     ];
 
@@ -3027,14 +3029,14 @@ function renderConnDetail() {
       html180 += '</div></div>';
     }
 
-    // ③ 出力極性（CC-Link選択時）
-    if (sel180Si === 'V' && sel180Pts === '32') {
-      // CC-Link: 32点のみ、NPN(2)/PNP(4)
+    // ③ 出力極性（CC-Link=32点のみ 2/4、DeviceNet=32点 2/4・16点 3/5）
+    if ((sel180Si === 'V' && sel180Pts === '32') || (sel180Si === 'Q' && sel180Pts)) {
+      var npn180 = sel180Pts === '16' ? '3' : '2', pnp180 = sel180Pts === '16' ? '5' : '4';
       html180 += '<div class="sub-select" style="margin-top:6px;"><div class="sub-lbl">③ 出力極性</div>'
         + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">';
       [
-        {code:'2', l:'プラスコモン', sub:'NPN / 品番: 2'},
-        {code:'4', l:'マイナスコモン', sub:'PNP / 品番: 4'},
+        {code:npn180, l:'プラスコモン', sub:'NPN / 品番: ' + npn180},
+        {code:pnp180, l:'マイナスコモン', sub:'PNP / 品番: ' + pnp180},
       ].forEach(function(o) {
         var sel = S.ex180PolarSel === o.code;
         html180 += '<div onclick="setEx180PolarSel(\''+o.code+'\')" style="border:1.5px solid '+(sel?'var(--blue)':'var(--border)')+';border-radius:6px;padding:7px 6px;cursor:pointer;text-align:center;background:'+(sel?'#ebf3ff':'#fff')+';transition:all .12s;">'
@@ -3043,18 +3045,10 @@ function renderConnDetail() {
           + '</div>';
       });
       html180 += '</div></div>';
-    } else if (sel180Si === 'Q' && sel180Pts) {
-      // DeviceNet: NPN固定、32点=品番2/16点=品番3
-      var autoCode = sel180Pts === '32' ? '2' : '3';
-      html180 += '<div class="sub-select" style="margin-top:6px;"><div class="sub-lbl">③ 出力極性</div>'
-        + '<div style="margin-top:4px;padding:6px 10px;border-radius:5px;background:#ebf3ff;border:1.5px solid var(--blue);font-size:9px;color:var(--blue);font-weight:600;">'
-        + 'プラスコモン（NPN）固定 — 品番コード: <strong>' + autoCode + '</strong>'
-        + '</div></div>';
-      S.ex180PolarSel = autoCode;
     }
 
     // ④ 通信コネクタ仕様（SIあり・極性確定後）
-    var polarReady = (sel180Si === 'V' && sel180Pts === '32' && S.ex180PolarSel) || (sel180Si === 'Q' && sel180Pts);
+    var polarReady = (sel180Si === 'V' && sel180Pts === '32' && S.ex180PolarSel) || (sel180Si === 'Q' && sel180Pts && S.ex180PolarSel);
     if (polarReady) {
       html180 += '<div class="sub-select" style="margin-top:6px;"><div class="sub-lbl">④ 通信コネクタ仕様</div>'
         + '<div style="font-size:8px;color:#94a3b8;margin:2px 0 4px;">※電源コネクタはマニホールドに同梱 / 電源コネクタはストレート型のみ</div>'
@@ -3943,10 +3937,10 @@ function getSiCommonRestriction() {
     return S.ex120Si === 'ZBN' ? 'P' : 'N';
   }
 
-  // EX180: ex180PolarSel '2'/'3'=NPN / '4'=PNP
+  // EX180: ex180PolarSel '2'/'3'=NPN / '4'/'5'=PNP
   if (w === 'ex180') {
     if (!S.ex180PolarSel) return null;
-    return S.ex180PolarSel === '4' ? 'P' : 'N';
+    return (S.ex180PolarSel === '4' || S.ex180PolarSel === '5') ? 'P' : 'N';
   }
 
   // EX510: ex510N='N'=マイナスコモン / 無記号=プラスコモン
@@ -5473,10 +5467,14 @@ function buildPN() {
     }
     /* v20: ⑦P,Eポート口径・⑧取付方法は連数セグメントの後にハイフンを挟む（どちらも無記号ならハイフンなし）。
        カタログ SS5Y3-12F1-05U⑥-⑦⑧。品番確認: SS5Y3-12F1-02U-N・-02U-D・-05D-ND6=OK／-02UN・-02UD・-05DND6=NG */
-    const upTail = `${peN}${mount}`;
+    /* v21: 52型（金属ベース上配管）のねじの種類は 00F/00N/00T（カタログ p.655 i）。取付記号はその直後
+       （品番確認 SS5Y3-52F1-05U-00F/-00N/-00T・-00FD・-00TD0・SS5Y5-52F1-04U-00ND8=OK／-00F-D=NG） */
+    const scr52 = (isMetalBase && S.subScrew) ? '00' + S.subScrew : '';
+    const upTail = `${peN}${scr52}${mount}`;
     full = `SS5Y${S.series}-${typeCode}-${countSeg}${upTail ? '-' + upTail : ''}`;
     segs.push({ key:'連数+P,E+口径+取付', val:`${countSeg}${upTail ? '-' + upTail : ''}` });
     segs.push({ key:'P,Eポート口径', val: isMetalBase ? 'ねじ（シリーズ固定）' : (S.connUpperPePort === null ? '—' : (S.connUpperPePort === '' ? '無記号(ミリ)' : 'N(インチ)')) });
+    if (isMetalBase) segs.push({ key:'ねじの種類', val: S.subScrew ? '00' + S.subScrew + '(' + ({F:'G',N:'NPT',T:'NPTF'}[S.subScrew]) + ')' : '無記号(Rc)' });
     segs.push({ key:'A,Bポート', val:'バルブ側で指定（上配管形バルブ）' });
   } else {
     const abCode = (S.abCode && S.abCode !== '__per_valve__') ? S.abCode : null;
@@ -5488,7 +5486,7 @@ function buildPN() {
     full = `SS5Y${S.series}-${typeCode}-${countSeg}-${portSeg}`;
     segs.push({ key:'連数+P,Eポート', val:countSeg });
     segs.push({ key:'A,B口径+取付', val:portSeg });
-    if (isMetalBase) segs.push({ key:'ねじの種類', val: S.subScrew==='F'?'F(G)':S.subScrew==='N'?'N(NPT)':'無記号(Rc)' });
+    if (isMetalBase) segs.push({ key:'ねじの種類', val: S.subScrew==='F'?'F(G)':S.subScrew==='N'?'N(NPT)':S.subScrew==='T'?'T(NPTF)':'無記号(Rc)' });
   }
   segs.push({ key:'取付方法', val: mountCode === null ? '—' : (mount === '' ? '無記号(直接取付)' : mount) });
 
@@ -6579,6 +6577,16 @@ function _applyWiringCode(code) {
   }
   if ((m = code.match(/^S8(.*)$/))) {
     setWiring('ex180');
+    // v21: S80 / S8[Q|V][2-5][A] を復元（V は 2/4 のみ）
+    var m180 = m[1].match(/^(?:(0)|([QV])([2-5])(A?))$/);
+    if (m180 && m180[1]) { setEx180Si('0'); return true; }
+    if (m180 && !(m180[2] === 'V' && (m180[3] === '3' || m180[3] === '5'))) {
+      setEx180Si(m180[2]);
+      setEx180Pts(m180[3] === '3' || m180[3] === '5' ? '16' : '32');
+      setEx180PolarSel(m180[3]);
+      setEx180Conn(m180[4] || '');
+      return true;
+    }
     return { ok: true, note: m[1] ? ('EX180詳細コード「' + m[1] + '」はStep5で選択してください') : null };
   }
   if ((m = code.match(/^S(AAN|ABN|ACN)(?:Y([1-8]))?$/))) {
@@ -6671,20 +6679,22 @@ function parseManifoldPN(raw) {
 
   if (pipe === '上配管') {
     // -{count}{eport}{N?}{mount}（コネクタベースのみP,E口径N）
-    var um = rest.match(/^([UDB][SR]?|[CEFGHJ])(N?)(AA|BA|[ABD]\d*)?$/);
+    // v21: v20 からP,E口径・ねじ・取付はハイフンの後（SS5Y3-12F1-05U-ND6）。ハイフンを外して読む
+    var um = rest.replace(/^([UDB][SR]?|[CEFGHJ])-/, '$1').match(/^([UDB][SR]?|[CEFGHJ])(N?)(?:00([FNT]))?(AA|BA|[ABD]\d*)?$/);
     if (!um) return { ok: false, error: '連数以降を解釈できません: ' + rest };
     var epErr = applyEport(um[1]);
     if (epErr) return { ok: false, error: epErr };
     // P,Eポート口径（無記号=ミリ/N=インチ）は金属ベース以外の上配管で使用（混合M12型も含む）
     if (base !== 'metal' && typeof setConnUpperPePort === 'function') setConnUpperPePort(um[2] || '');
-    applyMount(um[3] || '');
+    if (um[3] && base === 'metal' && typeof setSubScrew === 'function') setSubScrew(um[3]);
+    applyMount(um[4] || '');
     notes.push('上配管形: A,Bポート口径は各バルブ品番側で確認してください');
   } else {
     var sm = rest.match(/^([A-Z]{0,2})-([A-Z0-9]*)$/);
     if (!sm) return { ok: false, error: '連数以降を解釈できません: ' + rest };
     var epErr2 = applyEport(sm[1] || 'U');
     if (epErr2) return { ok: false, error: epErr2 };
-    var pm = sm[2].match(/^(C\d+|CM|LM|K[CN]\d+|LN?\d+|BN?\d+|N\d+|M5|M|0[123])?([FN]?)(AA|BA|[ABD]\d*)?$/);
+    var pm = sm[2].match(/^(C\d+|CM|LM|K[CN]\d+|LN?\d+|BN?\d+|N\d+|M5|M|0[123])?([FNT]?)(AA|BA|[ABD]\d*)?$/);
     if (!pm || (sm[2] && !pm[0])) return { ok: false, error: '口径/取付コードを解釈できません: ' + sm[2] };
     if (pm[1]) {
       if (base === 'mixed' && /^C\d{2,3}$/.test(pm[1]) && pm[1] !== 'CM') {
@@ -7335,7 +7345,7 @@ function updateRightInfo() {
   var sv7 = document.getElementById('sv7');
   if (sv7) sv7.textContent = getEportCode() || '—';
   document.getElementById('ri-sub').textContent   = S.base === 'metal'
-    ? (S.subScrew ? S.subScrew+'（'+({'F':'G','N':'NPT'}[S.subScrew]||S.subScrew)+'）' : '無記号（Rc）')
+    ? (S.subScrew ? S.subScrew+'（'+({'F':'G','N':'NPT','T':'NPTF'}[S.subScrew]||S.subScrew)+'）' : '無記号（Rc）')
     : '—（ワンタッチ管継手）';
 
   // Catalog ref
