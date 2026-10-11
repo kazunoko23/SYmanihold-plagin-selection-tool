@@ -6642,6 +6642,7 @@ function parseManifoldPN(raw) {
   var pipeDigit = typ.charAt(typ.length - 1);
   var pipe = pipeDigit === '0' ? '横配管' : pipeDigit === '1' ? '裏配管' : '上配管';
   setBase(base); setPipe(pipe);
+  var wcodeRaw = m[3];
   var wres = _applyWiringCode(m[3]);
   if (!wres) return { ok: false, error: '配線方式コードを解釈できません: 「' + m[3] + '」' };
   if (wres && wres.note) notes.push(wres.note);
@@ -6660,6 +6661,10 @@ function parseManifoldPN(raw) {
   var isSpecialW = EPORT_SPECIAL_WIRINGS.indexOf(S.wiring) >= 0;
   var epSel = document.getElementById('sel-eport');
   function applyEport(ep) {
+    // v21/v13: S0（SIなし）は EX260 として読まれるが、P,E が C〜J なら EX250 のSIなし（SS5Y3-12S0-02G・JJ5SY1-10S0-02J-C2 は品番確認OK）
+    if (!isSpecialW && /^[CEFGHJ]$/.test(ep) && /^S0$/.test(wcodeRaw)) {
+      setWiring('ex250'); setEx250Si('0'); isSpecialW = true;
+    }
     if (isSpecialW) {
       var found = null;
       Object.keys(EPORT_COMBINED).forEach(function(pos){
@@ -9044,7 +9049,8 @@ async function fillOfficialSpecForm(file) {
           if (tc === a + '0') return true;               // SIユニットなし S0 は EX250/EX500 等で共通の品番
           return !ex || S.wiring === 'ex' + ex[1];
         }
-        return !(/[A-Z]$/.test(a) && /[A-Z]/.test(nx));  // 末尾が英字なら次も英字＝別の配線（PG/PH/TC/FW）
+        if (/F$/.test(a) && nx === 'W') return true;      // F の書式で FW（SS5Y5-12F は FW 用の書式が無い）
+        return !(/[A-Z]$/.test(a) && /[A-Z]/.test(nx));  // 末尾が英字なら次も英字＝別の配線（PG/PH/TC）
       });
     }
     if (!_tplMatch()) {
@@ -9104,9 +9110,13 @@ async function fillOfficialSpecForm(file) {
       boxes.forEach(function(b){ var gi = Math.min(groupOf(b.n), 2); groups[gi].push(b); });
       // 値: G0=型式残り記号（配線方式・SI/極性・I-O連数等）, G1=連数+P,E, G2=口径+ねじ+取付
       // 残り記号は「ボックスの固定表記」を基準に切り出す（tm[2]基準だと配線方式記号を取りこぼす）
+      var typeCodeNoR = typeCode.replace(/^(5[02])R/, '$1');
+      var noRBox = !!fixedText && typeCode.indexOf(fixedText) !== 0 && typeCodeNoR !== typeCode && typeCodeNoR.indexOf(fixedText) === 0;
       var typeRest = (fixedText && typeCode.indexOf(fixedText) === 0)
         ? typeCode.slice(fixedText.length)
+        : noRBox ? typeCodeNoR.slice(fixedText.length)      // v21: R の枠が無い書式（R は追記を案内）
         : typeCode.slice(tm[2].length);
+      if (noRBox) alert('注意: この仕様書の型式ボックスには外部パイロット「R」の枠がありません。型式ボックスの横に「' + typeCode.slice(0, 3) + '」（外部パイロット）と追記してください。');
       var restTokens = [];
       var trWork = typeRest;
       var SI_TOKENS = ['EP','EB','DA','FA','FB','WS','FW','FC','PG','PH','PC','TC','AAN','ABN','ACN',
