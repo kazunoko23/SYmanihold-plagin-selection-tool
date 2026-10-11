@@ -7,8 +7,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const html = readFileSync(join(here, '..', 'smc_sy_plugin_v19.html'), 'utf8');
-const HTML_PATH_FOR_DISCON_TEST = join(here, '..', 'smc_sy_plugin_v19.html');
+const html = readFileSync(join(here, '..', 'smc_sy_plugin_v20.html'), 'utf8');
+const HTML_PATH_FOR_DISCON_TEST = join(here, '..', 'smc_sy_plugin_v20.html');
 // scriptブロックが増えても壊れないよう buildPN を含むブロックを探す
 const blocks = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 const appJs = blocks.find(b => /function buildPN/.test(b));
@@ -309,18 +309,34 @@ console.log('════ v13 F) 金属ベース裏配管(51型)はP,Eポート�
   ck('v13 F対照: 11型(コネクタベース裏配管)はU/D/B制約なし(Uのまま)', globalThis.document.getElementById('sel-eport').value, 'U');
 }
 
-console.log('════ v13 G) 上配管形(12/52型)はDINレール取付非対応 ════');
+console.log('════ v20 G) 上配管形(12/52型)のDINレール取付はハイフンの後（v13の「非対応」は誤診） ════');
 {
   mkValve({ series:'3', base:'conn', pipe:'上配管', wiring:'term_sp', connUpperPePort:'', mountMethod:'direct', count:3, eport:'U' });
   ck('v13 G: 直接取付はOK(選定完了)', pn(), 'SS5Y3-12TC-03U');
 
+  // 品番確認 2026-10-11: SS5Y3-12TC-03US-D・-D0・-D4・-ND = OK／-03UD・-03UD0 = NG（ハイフン欠落）
   mkValve({ series:'3', base:'conn', pipe:'上配管', wiring:'term_sp', connUpperPePort:'', mountMethod:'din', mountDinLen:'', count:3, eport:'U' });
-  ck('v13 G: DINレール(標準長)はgetMountCodeがnull', getMountCode(), null);
-  ck('v13 G: DIN指定時は品番が未完成(complete=false)', buildPN().complete, false);
+  ck('v20 G: DINレール(標準長)は -03U-D', pn(), 'SS5Y3-12TC-03U-D');
+  mkValve({ series:'3', base:'conn', pipe:'上配管', wiring:'term_sp', connUpperPePort:'N', mountMethod:'din', mountDinLen:'', count:3, eport:'U' });
+  ck('v20 G: インチP,E口径＋DINは -03U-ND', pn(), 'SS5Y3-12TC-03U-ND');
+  mkValve({ series:'3', base:'conn', pipe:'上配管', wiring:'term_sp', connUpperPePort:'N', mountMethod:'direct', count:3, eport:'U' });
+  ck('v20 G: インチP,E口径のみは -03U-N', pn(), 'SS5Y3-12TC-03U-N');
 
   mkValve({ series:'5', base:'metal', pipe:'上配管', wiring:'dsub', metalFlatS:'', mountMethod:'din', mountDinLen:'8', count:4, eport:'U', spec:{ portSize:'C8' } });
   for (let i=0;i<4;i++) getValveSpec(i).portSize='C8';
-  ck('v13 G: 金属ベース上配管(52型)でもDINは未完成扱い', buildPN().complete, false);
+  ck('v20 G: 金属ベース上配管(52型)のDINも -04U-D8', buildPN().full, 'SS5Y5-52F1-04U-D8');
+}
+
+console.log('════ v20) 金属ベース・EX510 のオールシングル S は連数の前／EX510 は ダブル8連・シングル12連 ════');
+{
+  // 品番確認 2026-10-11: SS5Y3-50F1-S02U-C2・SS5Y3-50S5N-S02U-C2・SS5Y3-50S5-S10B-C2 = OK／SS5Y3-50F1S-02U-C2・SS5Y3-50S5-10B-C2 = NG
+  mkValve({ series:'3', base:'metal', pipe:'横配管', wiring:'dsub', metalFlatS:'S', mountMethod:'direct', count:2, eport:'U', abCode:'C2', abPipeType:'push', abDir:'ST' });
+  ck('v20 金属50型オールシングルは 50F1-S02U', pn(), 'SS5Y3-50F1-S02U-C2');
+  mkValve({ series:'3', base:'metal', pipe:'横配管', wiring:'ex510', mountMethod:'direct', count:2, eport:'U', abCode:'C2', abPipeType:'push', abDir:'ST' });
+  S.ex510N = 'N'; S.ex510S = 'S';
+  ck('v20 EX510 マイナスコモン・オールシングルは 50S5N-S02U', pn(), 'SS5Y3-50S5N-S02U-C2');
+  S.ex510S = ''; setCount(10);
+  ck('v20 EX510 オールダブルは8連まで', getWiringLimits().st, 8);
 }
 
 console.log('════ v13 H) SY7000はエルボ継手にインチ表記(LN#/BN#)が実在しない ════');
