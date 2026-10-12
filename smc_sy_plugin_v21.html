@@ -8243,7 +8243,7 @@ function exportExcel() {
   bom.push(['マニホールド', '', res.full, `${typ}型 ${S.pipe} ${wDef?wDef.name:''} ${S.valveCount}連`]);
 
   // ─ バルブ・スロットオプション（連番順）
-  var n = S.valveCount || 0;
+  var n = S.valveCount || 0, bFree = _blockAttachedDiscs();
   for (var i = 0; i < n; i++) {
     var spec = getValveSpec(i);
     var opt  = spec.manifoldOpt || {};
@@ -8304,13 +8304,18 @@ function exportExcel() {
         bom.push(['オプション', slot+'連目付属', getBackpressAssyPN(series), "背圧防止弁Ass\'y（MH装着）"]);
       }
       if (opt.blockingDiscSup) {
-        bom.push(['オプション', slot+'連目付属', getBlockingDiscPN(series,'sup'), 'SUP.ブロッキングディスク']);
+        if (bFree.sup > 0) { bFree.sup--; bom.push(['オプション', slot+'連目', '—', 'SUP.ブロッキングディスク（単独SUP.ブロックに付属・遮断位置）']); }
+        else bom.push(['オプション', slot+'連目付属', getBlockingDiscPN(series,'sup'), 'SUP.ブロッキングディスク']);
       }
       if (opt.blockingDiscExh) {
-        // EXH: SY3000=SY30M-40-2A×1個 / SY5000・7000=SY□0M-40-1A×2個
-        // （カタログ「EA/EB両側のEXH.をブロックする場合、2ヶ必要になります」）
-        bom.push(['オプション', slot+'連目付属', getBlockingDiscPN(series,'exh'), 'EXH.ブロッキングディスク' + (series !== '3' ? '（2個使用）' : '')]);
-        if (series !== '3') bom.push(['オプション', slot+'連目付属', getBlockingDiscPN(series,'exh'), 'EXH.ブロッキングディスク（2個目）']);
+        // EXH: SY3000=SY30M-40-2A／SY5000・7000=SY□0M-40-1A、いずれも2個
+        // （カタログ p.623「EA/EB両側のEXH.をブロックする場合、2ヶ必要になります」。v21: SY3000も2個＝
+        //   公式の従来仕様書「SY30M-40-2A (2個)」・新方式仕様書「SY30M-40-2A x2」と一致させた。v20まではSY3000だけ1個）
+        if (bFree.exh > 0) { bFree.exh--; bom.push(['オプション', slot+'連目', '—', 'EXH.ブロッキングディスク（単独EXH.ブロックに付属・遮断位置）']); }
+        else {
+          bom.push(['オプション', slot+'連目付属', getBlockingDiscPN(series,'exh'), 'EXH.ブロッキングディスク（2個使用）']);
+          bom.push(['オプション', slot+'連目付属', getBlockingDiscPN(series,'exh'), 'EXH.ブロッキングディスク（2個目）']);
+        }
       }
     }
   }
@@ -8423,7 +8428,7 @@ function exportExcel() {
   //   カタログ「マニホールドアセンブリの表示方法（手配例）」の形式
   // ══════════════════════════════════════════════
   var agg = {};      // pn → {count, label, order}
-  var aggOrder = 0;
+  var aggOrder = 0, aFree = _blockAttachedDiscs();
   function aggAdd(pn, label) {
     if (!pn || pn.indexOf('⚠') >= 0) return;
     var key = pn;
@@ -8443,10 +8448,13 @@ function exportExcel() {
     if (aopt.residualPerf)  aggAdd(getOptPN('residual_perf', series, {}), 'パーフェクトスペーサ');
     if (aopt.reducValve && aopt.reducValve.gauge) aggAdd(buildReducValvePN(series, aopt.reducValve), 'スペーサ形減圧弁');
     if (aopt.backpressAssy) aggAdd(getBackpressAssyPN(series), "背圧防止弁Ass'y");
-    if (aopt.blockingDiscSup) aggAdd(getBlockingDiscPN(series,'sup'), 'SUPブロッキングディスク');
+    if (aopt.blockingDiscSup) { if (aFree.sup > 0) aFree.sup--; else aggAdd(getBlockingDiscPN(series,'sup'), 'SUPブロッキングディスク'); }
     if (aopt.blockingDiscExh) {
-      aggAdd(getBlockingDiscPN(series,'exh'), 'EXHブロッキングディスク');
-      if (series !== '3') aggAdd(getBlockingDiscPN(series,'exh'), 'EXHブロッキングディスク'); // 5000/7000は同品番2個
+      if (aFree.exh > 0) aFree.exh--;
+      else {
+        aggAdd(getBlockingDiscPN(series,'exh'), 'EXHブロッキングディスク');
+        aggAdd(getBlockingDiscPN(series,'exh'), 'EXHブロッキングディスク'); // v21: 全シリーズ2個（SY3000も）
+      }
     }
   }
   if (S.wiring === 'ex600' && S.ex600IoUnits) {
@@ -8896,12 +8904,24 @@ function _setSheetCell(xml, ref, value) {
 }
 
 // ─── 手配リスト（構成製品リスト/手配集約の共通ソース）───
+// v21: 単独SUP/EXHブロックに付属するブロッキングディスク（カタログ p.623: SUPを遮断するSUP.ブロッキングディスク2個は
+//   単独SUP.ブロックに付属／EXHを遮断するEXH.ブロッキングディスク2set(4個)は単独EXH.ブロックに付属。遮断箇所は1setにつき1〜2ケ所）。
+//   ブロックがある間は、その遮断位置として置いたディスクを別手配に数えない（v20 までは別に手配して過剰だった）
+function _blockAttachedDiscs() {
+  var ns = 0, ne = 0;
+  for (var i = 0; i < (S.valveCount || 0); i++) {
+    var o = getValveSpec(i).manifoldOpt || {};
+    if (o.slot === 'sup_block') ns++;
+    if (o.slot === 'exh_block') ne++;
+  }
+  return { sup: 2 * ns, exh: 2 * ne };
+}
 function buildOrderItems() {
   var series = S.series || '5';
   var typeLabelMap = {single:'2位置シングル', double:'2位置ダブル', '3cs':'3位置クローズドセンタ',
     '3es':'3位置エキゾーストセンタ', '3ps':'3位置プレッシャセンタ', '4pos':'4位置',
     'dual':'4位置デュアル', '3port':'4位置3ポート', blank:'ブランクプレート'};
-  var agg = {}, order = 0;
+  var agg = {}, order = 0, dFree = _blockAttachedDiscs();
   function add(pn, label) {
     if (!pn || pn.indexOf('⚠') >= 0 || pn.indexOf('—') >= 0) return;
     if (!agg[pn]) agg[pn] = { count: 0, label: label, order: order++ };
@@ -8918,10 +8938,13 @@ function buildOrderItems() {
     if (opt.residualPerf)  add(getOptPN('residual_perf', series, {}), 'パーフェクトスペーサ');
     if (opt.reducValve && opt.reducValve.gauge) add(buildReducValvePN(series, opt.reducValve), 'スペーサ形減圧弁');
     if (opt.backpressAssy) add(getBackpressAssyPN(series), "背圧防止弁Ass'y");
-    if (opt.blockingDiscSup) add(getBlockingDiscPN(series, 'sup'), 'SUPブロッキングディスク');
+    if (opt.blockingDiscSup) { if (dFree.sup > 0) dFree.sup--; else add(getBlockingDiscPN(series, 'sup'), 'SUPブロッキングディスク'); }
     if (opt.blockingDiscExh) {
-      add(getBlockingDiscPN(series, 'exh'), 'EXHブロッキングディスク');
-      if (series !== '3') add(getBlockingDiscPN(series, 'exh'), 'EXHブロッキングディスク'); // 5000/7000は同品番2個
+      if (dFree.exh > 0) dFree.exh--;
+      else {
+        add(getBlockingDiscPN(series, 'exh'), 'EXHブロッキングディスク');
+        add(getBlockingDiscPN(series, 'exh'), 'EXHブロッキングディスク'); // v21: 全シリーズ2個（SY3000も）
+      }
     }
   }
   if (S.wiring === 'ex600' && S.ex600IoUnits) {
@@ -9171,9 +9194,11 @@ async function fillNewFormatSpec(file, entries, res) {
   var vAns = {
     'クリーン': '', 'シール方式': common('seal', '0'), '定格電圧': common('voltage', '5'),
     'ランプ': common('lamp', ''), 'マニュアル': common('manual', ''), '取付オプション': common('screw', ''),
-    'オーダーメイド': specs.some(function(s){ return s.fluoroRubber; }) ? '-X90' : ''
+    'オーダーメイド': (specs.length && specs.every(function(s){ return s.fluoroRubber; })) ? '-X90' : ''
   };
   var vSeal = vAns['シール方式'], vMan = vAns['マニュアル'];
+  if (specs.some(function(s){ return s.fluoroRubber; }) && !vAns['オーダーメイド'])
+    notes.push('主弁フッ素ゴム（-X90）が一部の連だけのため、この仕様書（バルブ共通の設問）では表せません。特記事項に連を書いてください');
   Object.keys(V.cells).forEach(function(ref) {
     if (colOf2(ref) !== 'C') return;
     var r = rowOf(ref), lab = String(V.cells[ref]);
@@ -9237,12 +9262,19 @@ async function fillNewFormatSpec(file, entries, res) {
   };
   function labelRow(word, after) { var r = Object.keys(P.cells).filter(function(k){ return colOf2(k) === 'C' && String(P.cells[k]).indexOf(word) >= 0 && rowOf(k) > (after || 0); }).map(rowOf).sort(function(a,b){ return a-b; })[0]; return r || 0; }
   R.blank = labelRow('ブランキングプレート');
-  R.stop = labelRow('ストップ弁スペーサ'); R.perf = labelRow('パーフェクトスペーサ'); R.bpAssy = labelRow('背圧防止弁');
+  R.stop = labelRow('ストップ弁スペーサ'); R.perf = labelRow('パーフェクトスペーサ');
+  R.bpAssy = Object.keys(rowList).map(Number).sort(function(a,b){ return a-b; })
+    .find(function(r){ return rowList[r].join(',') === 'O' && cLabel(r).indexOf('背圧防止弁') >= 0; }) || 0;   // 「背圧防止弁（バルブ内蔵）」行は H
   var rSup = labelRow('単独SUP.スペーサ'), rExh = labelRow('単独EXH.スペーサ');
   R.supSt = labelRow('配管ストレート', rSup); R.supSh = labelRow('ショートエルボ', rSup); R.supLo = labelRow('ロングエルボ', rSup);
   R.exhSt = labelRow('配管ストレート', rExh); R.exhSh = labelRow('ショートエルボ', rExh); R.exhLo = labelRow('ロングエルボ', rExh);
   R.discS = labelRow('SUP.ブロッキングディスク'); R.discE = labelRow('EXH.ブロッキングディスク');
   R.supBlk = labelRow('単独SUP.ブロック'); R.exhBlk = labelRow('単独EXH.ブロック');
+  // 単独SUP/EXHブロックを使うときは、そのブロックの遮断位置（ブロッキングディスクの位置）をブロック行の次の行に「→」で指定する
+  var hasSupBlk = false, hasExhBlk = false;
+  for (var bi = 0; bi < S.valveCount; bi++) { var bo = getValveSpec(bi).manifoldOpt || {}; if (bo.slot === 'sup_block') hasSupBlk = true; if (bo.slot === 'exh_block') hasExhBlk = true; }
+  if (hasSupBlk && R.supBlk && rowList[R.supBlk + 1]) R.discS = R.supBlk + 1;
+  if (hasExhBlk && R.exhBlk && rowList[R.exhBlk + 1]) R.discE = R.exhBlk + 1;
   // 上配管形（12/52型）: 連ごとのバルブ口径（バルブ品番の口径記号＋ねじ種類）
   R.vport = (S.pipe === '上配管') ? labelRow('A,Bポート管接続口径') : 0;
   var rMatch = labelRow('2連マッチング継手');
@@ -9253,6 +9285,9 @@ async function fillNewFormatSpec(file, entries, res) {
     if (!col) { skipped.push(n); continue; }
     var spec = getValveSpec(n - 1), opt = spec.manifoldOpt || {}, vt = S.valveTypes[n - 1] || 'single';
     if (vt === 'blank' || opt.slot === 'blanking') { if (R.blank) put('仕様書作成', col + R.blank, 'O'); nSt++; continue; }
+    // 単独SUP/EXHブロック（バルブの代わりに連を占める）: 口径を記入
+    if (opt.slot === 'sup_block' && R.supBlk) { put('仕様書作成', col + R.supBlk, opt.slotSize || ''); nSt++; continue; }
+    if (opt.slot === 'exh_block' && R.exhBlk) { put('仕様書作成', col + R.exhBlk, opt.slotSize || ''); nSt++; continue; }
     if (opt.slot) { notes.push(n + '連目のスロット品（' + opt.slot + '）は手動で記入してください'); continue; }
     var swc = getSwitchCode(vt);
     if (R.sw) put('仕様書作成', col + R.sw, /^\d$/.test(swc) ? +swc : swc, /^\d$/.test(swc));
