@@ -3874,6 +3874,12 @@ function getBlockSizes(series, elbow, unit) {
 function getDefaultSlotElbowUnit() {
   var elbow = '1'; // ストレートデフォルト
   if (S.abDir && S.abDir !== 'ST') elbow = '2'; // エルボ選択中なら2
+  // v21: 型ごとの既定（カタログ型式表示「2 ショートエルボタイプ（12型）／3 ロングエルボタイプ（11型）」、
+  //   SMC新方式仕様書の単独ブロック欄の品番も 10型=1A・11型=3A・12型=2A 固定）
+  var tn = (typeof getTypeNum === 'function') ? getTypeNum() : null;
+  if (tn === '10' || tn === 'M10') elbow = '1';
+  else if (tn === '11' || tn === 'M11') elbow = (S.series === '3') ? '2' : '3';
+  else if (tn === '12' || tn === 'M12') elbow = '2';
   // v15: SY3000もショートエルボ(2A)あり（ロングエルボ3AのみSY5/7専用）
   var unit = (S.abUnit === 'inch') ? 'inch' : 'mm';
   return { elbow: elbow, unit: unit };
@@ -3922,12 +3928,14 @@ function getSiCommonRestriction() {
   // EX250: マイナスコモン(PNP)固定
   if (w === 'ex250') return S.ex250Si ? 'P' : null;
 
-  // EX260: SIコード末尾N=プラスコモン / それ以外=マイナスコモン（0,CAN,FPN,DPN=制約なし扱い）
+  // EX260: SIコード末尾N=マイナスコモン(PNP) / それ以外=プラスコモン(NPN)（0,CAN,FPN,DPN=制約なし扱い）
+  //   v21: v20 までは逆（末尾N=プラス）で、SQA 等でバルブがマイナスコモン(NZ)に直されていた。
+  //   EX260_ALL の表（QA=NPN/QAN=PNP）・公式の新方式仕様書の判定（QA=プラスコモン）・JSY 版と一致させた
   if (w === 'ex260') {
     if (!S.ex260Si || S.ex260Si === '0') return null;
     var noRestrict260 = ['CAN','FPN','DPN'];
     if (noRestrict260.indexOf(S.ex260Si) >= 0) return null;
-    return S.ex260Si.endsWith('N') ? 'N' : 'P';
+    return S.ex260Si.endsWith('N') ? 'P' : 'N';
   }
 
   // EX126: V=プラスコモン(NPN)
@@ -7332,6 +7340,34 @@ function updateCompatList() {
     { label:'金属ベース: Dサブ/フラット/EX510のみ対応', ok: S.base!=='metal' || !S.wiring || S.wiring==='ex510' || S.wiring==='dsub' || S.wiring==='flat', hide: S.base!=='metal' },
     { label:'11型（裏配管）: 直接取付のみ', ok: !(S.pipe==='裏配管' && S.base!=='metal' && S.mountMethod==='din'), hide: S.pipe!=='裏配管' },
   ];
+  // v21: ブロッキングディスク単独（単独SUP/EXHブロックなし）の数と P,Eポート位置（SMC新方式仕様書の判定と同じ:
+  //   P,E が片側(U/D)だけなら置けない＝反対側の連に供給/排気が届かない。両側(B)なら SUP 1枚・EXH 1組まで）
+  var dc = { sup: 0, exh: 0, sb: 0, eb: 0, first: false };
+  for (var di = 0; di < (S.valveCount || 0); di++) {
+    var dop = getValveSpec(di).manifoldOpt || {};
+    if (dop.blockingDiscSup) { dc.sup++; if (di === 0) dc.first = true; }
+    if (dop.blockingDiscExh) { dc.exh++; if (di === 0) dc.first = true; }
+    if (dop.slot === 'sup_block') dc.sb++;
+    if (dop.slot === 'exh_block') dc.eb++;
+  }
+  // v21: 口径混合（CM/LM/M）の連ごとの口径にミリとインチを混ぜない（SMC新方式仕様書「ミリ・インチの混合は不可」）
+  if (S.abCode === 'CM' || S.abCode === 'LM' || S.abCode === 'M') {
+    var mmN = 0, inN = 0;
+    for (var mi = 0; mi < (S.valveCount || 0); mi++) {
+      var ms = getValveSpec(mi), mo = ms.manifoldOpt || {};
+      if (mo.slot || S.valveTypes[mi] === 'blank' || !ms.portSize) continue;
+      if (/^[LBK]?N\d/.test(ms.portSize)) inN++; else mmN++;
+    }
+    if (mmN && inN) checks.push({ label: '口径混合: ミリとインチは混ぜられない', ok: false });
+  }
+  if (dc.sup || dc.exh) {
+    var pePos = (document.getElementById('sel-eport') || {}).value || 'U';
+    var lone = (dc.sb ? 0 : dc.sup) + (dc.eb ? 0 : dc.exh);
+    var discOk = !dc.first && (pePos === 'B' ? ((dc.sb || dc.sup <= 1) && (dc.eb || dc.exh <= 1)) : lone === 0);
+    checks.push({ label: 'ブロッキングディスク: ' + (dc.first ? '1連目（D側端）には置けない'
+      : pePos === 'B' ? 'P,E両側で SUP 1枚・EXH 1組まで（それ以上は単独ブロック併用）'
+      : 'P,E片側(' + pePos + ')では単独SUP/EXHブロックとの併用のみ'), ok: discOk });
+  }
   list.innerHTML = checks.filter(c=>!c.hide).map(c => {
     const cls = c.ok===null ? 'warn' : c.ok ? 'ok' : 'ng';
     const icon = c.ok===null ? '?' : c.ok ? '✓' : '✗';
@@ -9091,6 +9127,14 @@ async function fillNewFormatSpec(file, entries, res) {
     nWrite++;
   }
   function rowOf(ref) { return parseInt(ref.match(/\d+$/)[0], 10); }
+  // セルの値を消す（テンプレートの初期値を外す。空文字を書くと COUNTA 等で「入力あり」扱いになるため値ごと消す）
+  function clearCell(sh, ref) {
+    var re3 = new RegExp('<c r="' + ref + '"([^>]*?)(?:/>|>[\\s\\S]*?</c>)');
+    var m3 = SH[sh].xml.match(re3);
+    if (!m3) return;
+    SH[sh].xml = SH[sh].xml.replace(re3, '<c r="' + ref + '"' + m3[1].replace(/ t="[^"]*"/, '') + '/>');
+    nWrite++;
+  }
   function colOf2(ref) { return ref.match(/^[A-Z]+/)[0]; }
   function dvListFor(sh, ref) {
     var d = SH[sh].dv.find(function(x){ return _nfSqrefRefs(x.sqref).indexOf(ref) >= 0; });
@@ -9107,6 +9151,9 @@ async function fillNewFormatSpec(file, entries, res) {
   var reqE0 = {}; (e3.match(/E\d+=""/g) || []).forEach(function(t){ reqE0[t.replace('=""', '')] = 1; });
   function buildItems(list) {
     return list.map(function(sref) {
+      var lit = sref.match(/^"(.*)"$/);
+      if (lit) return { kind: 'fixed', r: 0, code: lit[1] };      // 品番式に直接書かれた文字（混合取付の "-" 等）
+      if (!/^[A-Z]+\d+$/.test(sref)) return { kind: 'skip', r: 0 };
       var r = rowOf(sref), rf = B.f['R' + r], rv = B.cells['R' + r], sf = B.f['S' + r] || '';
       // S列が「R をそのまま出す」標準形でなく "-" を条件で出す式なら、条件付きのハイフン（12型の S61 等）
       if (sf && /"-"/.test(sf) && !/IF\(R\d+="","",IF\(R\d+="無記号","",R\d+\)\)/.test(sf.replace(/\$/g, ''))) return { kind: 'opt', r: r, opts: [{ code: '-' }, { code: '' }] };
@@ -9129,6 +9176,8 @@ async function fillNewFormatSpec(file, entries, res) {
       }
       if (rf) return { kind: 'opt', r: r, opts: [{ code: '-' }, { code: '' }] };   // 条件付きの「-」
       if (rv !== undefined) return { kind: 'fixed', r: r, code: rv === '無記号' ? '' : String(rv) };
+      var sv = B.cells['S' + r];                                   // S列に直接書かれた固定記号（M11 EX180 の S48「-」等）
+      if (!sf && sv !== undefined) return { kind: 'fixed', r: r, code: sv === '無記号' ? '' : String(sv) };
       return { kind: 'skip', r: r };
     });
   }
@@ -9163,19 +9212,27 @@ async function fillNewFormatSpec(file, entries, res) {
       + 'シリーズ・型・配線方式が仕様書と合っているか確認してください。');
     return;
   }
-  var wiringCode = '';
+  var wiringCode = '', baseLabel = {};
   // 無記号の選択肢は、品番式が「空欄は入力漏れ」としている欄（E3 の E□="" の欄）にだけ書く
   //（DINレール長さ等は直接取付では空欄のままが正しい＝書くとブック側でエラー）
   var reqE = {}; (e3.match(/E\d+=""/g) || []).forEach(function(t){ reqE[t.replace('=""', '')] = 1; });
   items.forEach(function(it, i){
     if (it.kind !== 'choice' || !asg[i]) return;
     var o = asg[i];
-    if (o.code === '' && (!reqE['E' + it.r] || o.label === null)) return;
+    if (o.code === '' && (!reqE['E' + it.r] || o.label === null)) {
+      // 必須でない設問の「無記号」: DINレール長さは DIN取付のときだけ「標準長さ」を書き、それ以外は初期値を消す
+      //（例 EX180 のブックは初期値が「DINレール取付・標準長さ」で、直接取付に変えると長さの初期値がエラーになる）
+      var cl = String(B.cells['C' + it.r] || '');
+      var std = it.opts.find(function(x){ return x.code === '' && x.label; });
+      if (/DINレール長さ/.test(cl) && S.mountMethod === 'din' && std) put('ベース', 'E' + it.r, std.label);
+      else if (B.cells['E' + it.r] !== undefined && !B.f['E' + it.r]) clearCell('ベース', 'E' + it.r);
+      return;
+    }
     // 同じ記号の選択肢が複数ある設問（コネクタ取出し向き 1/2 とリード線長さ 1/2/3）は配線方式で選び分け
     var same = it.opts.filter(function(x){ return x.code === o.code; });
     if (same.length > 1) o = /^L\d/.test(wiringCode) ? same[same.length - 1] : same[0];
     if (/^(F|FW|P|PG|PH|J|G|L\d|M|T|TC)$/.test(o.code) && !wiringCode) wiringCode = o.code;
-    put('ベース', 'E' + it.r, o.label);
+    put('ベース', 'E' + it.r, o.label); baseLabel['E' + it.r] = o.label;
   });
   // DINレール長さ等で無記号（空）の設問は既定値のままで良い
 
@@ -9276,18 +9333,62 @@ async function fillNewFormatSpec(file, entries, res) {
   if (hasSupBlk && R.supBlk && rowList[R.supBlk + 1]) R.discS = R.supBlk + 1;
   if (hasExhBlk && R.exhBlk && rowList[R.exhBlk + 1]) R.discE = R.exhBlk + 1;
   // 上配管形（12/52型）: 連ごとのバルブ口径（バルブ品番の口径記号＋ねじ種類）
-  R.vport = (S.pipe === '上配管') ? labelRow('A,Bポート管接続口径') : 0;
+  R.vport = (S.pipe === '上配管') ? (labelRow('A,Bポート管接続口径') || labelRow('Ａ，Ｂポート')) : 0;
+  // 混合取付（M10/11/12型）: 連ごとのバルブサイズ（3/5 または 5/7）。ツールの搭載バルブは全連 S.series
+  R.vsize = (S.base === 'mixed') ? findRow(function(s){ return s === '3,5' || s === '5,7'; }) : 0;
   var rMatch = labelRow('2連マッチング継手');
   R.mix = rMatch ? findRow(function(s, r){ return r > rMatch && /(^|,)C\d/.test(s) && s.split(',').length >= 4; }) : 0;
+  // 配線個別指定（シングル/ダブル）は、ブックが必須とするとき（連数 > 配線方式の最大点数÷2）だけ全連に書く。
+  //   ブックは「1か所でも書いたら全連数ぶん」を求める（AJ列「配線指示箇所過不足エラー」）。ブランキング・ブロックの連は 1
+  var wireNeed = false;
+  if (R.wire) {
+    var wlim = null;
+    Object.keys(B.f).some(function(ref){
+      var m4 = B.f[ref].replace(/\$/g, '').match(/IF\(R(\d+)>U(\d+)\/2/);
+      if (!m4) return false;
+      var uf = (B.f['U' + m4[2]] || '').replace(/\$/g, '').match(/INDEX\(([A-Z]+)(\d+):([A-Z]+)\d+,1,F(\d+)\)/);
+      var ff = uf && (B.f['F' + uf[4]] || '').replace(/\$/g, '').match(/MATCH\(E(\d+),([A-Z]+)(\d+):([A-Z]+)\d+/);
+      if (!ff) return false;
+      var lab = baseLabel['E' + ff[1]];
+      for (var c5 = _colToNum(ff[2]); lab !== undefined && c5 <= _colToNum(ff[4]); c5++) {
+        if (B.cells[_nfNumToCol(c5) + ff[3]] === lab) {
+          var v5 = B.cells[_nfNumToCol(_colToNum(uf[1]) + c5 - _colToNum(ff[2])) + uf[2]];
+          if (v5 !== undefined && !isNaN(+v5)) wlim = +v5;
+          break;
+        }
+      }
+      return true;
+    });
+    if (wlim === null) wlim = getWiringLimits().sol;
+    wireNeed = S.valveCount > wlim / 2;
+  }
   var nSt = 0, skipped = [];
   for (var n = 1; n <= S.valveCount; n++) {
     var col = stCol[n];
     if (!col) { skipped.push(n); continue; }
     var spec = getValveSpec(n - 1), opt = spec.manifoldOpt || {}, vt = S.valveTypes[n - 1] || 'single';
+    if (wireNeed && (vt === 'blank' || opt.slot)) put('仕様書作成', col + R.wire, 1, true);
+    // ブロッキングディスク: ツールは「その連のD側の境界」、ブックの欄は「その連のU側の境界（→）」＝1つD側の連の列に書く
+    if (opt.blockingDiscSup || opt.blockingDiscExh) {
+      var dcol = stCol[n - 1];
+      if (!dcol) notes.push(n + '連目のブロッキングディスク（D側端）は仕様書の欄に入りません');
+      else {
+        if (R.discS && opt.blockingDiscSup) { var ls = rowList[R.discS]; put('仕様書作成', dcol + R.discS, ls && ls[0] || 'O'); }
+        if (R.discE && opt.blockingDiscExh) { var le = rowList[R.discE]; put('仕様書作成', dcol + R.discE, le && le[0] || 'O'); }
+      }
+    }
+    if (R.vsize && (!opt.slot || opt.slot === 'blanking')) put('仕様書作成', col + R.vsize, +S.series, true);
     if (vt === 'blank' || opt.slot === 'blanking') { if (R.blank) put('仕様書作成', col + R.blank, 'O'); nSt++; continue; }
     // 単独SUP/EXHブロック（バルブの代わりに連を占める）: 口径を記入
-    if (opt.slot === 'sup_block' && R.supBlk) { put('仕様書作成', col + R.supBlk, opt.slotSize || ''); nSt++; continue; }
-    if (opt.slot === 'exh_block' && R.exhBlk) { put('仕様書作成', col + R.exhBlk, opt.slotSize || ''); nSt++; continue; }
+    if ((opt.slot === 'sup_block' && R.supBlk) || (opt.slot === 'exh_block' && R.exhBlk)) {
+      var bRow = opt.slot === 'sup_block' ? R.supBlk : R.exhBlk;
+      put('仕様書作成', col + bRow, opt.slotSize || '');
+      // 仕様書の欄は型ごとにエルボタイプ固定（AJ列の品番 SY□0M-78-○A-□）。ツールの選択と違えば知らせる
+      var bm = String(P.cells['AJ' + bRow] || '').match(/-7[89]-(\d)A/);
+      if (bm && bm[1] !== String(opt.slotElbow || '1'))
+        notes.push(n + '連目の単独' + (opt.slot === 'sup_block' ? 'SUP' : 'EXH') + '.ブロックは、この仕様書では ' + bm[1] + 'A（' + ({ '1': 'ストレート', '2': 'ショートエルボ', '3': 'ロングエルボ' }[bm[1]]) + '）固定です（ツールの選択は ' + (opt.slotElbow || '1') + 'A）');
+      nSt++; continue;
+    }
     if (opt.slot) { notes.push(n + '連目のスロット品（' + opt.slot + '）は手動で記入してください'); continue; }
     var swc = getSwitchCode(vt);
     if (R.sw) put('仕様書作成', col + R.sw, /^\d$/.test(swc) ? +swc : swc, /^\d$/.test(swc));
@@ -9297,7 +9398,7 @@ async function fillNewFormatSpec(file, entries, res) {
     if (R.bp && spec.backpress === 'H') put('仕様書作成', col + R.bp, 'H');
     if (R.pOpt && spec.pilotOpt) put('仕様書作成', col + R.pOpt, spec.pilotOpt);
     if (R.coil && spec.coil === 'T') put('仕様書作成', col + R.coil, 'T');
-    if (R.wire) put('仕様書作成', col + R.wire, vt === 'single' ? 1 : 2, true);
+    if (wireNeed) put('仕様書作成', col + R.wire, vt === 'single' ? 1 : 2, true);
     if (R.mix && isAbMix() && spec.portSize) put('仕様書作成', col + R.mix, spec.portSize);
     if (R.vport && spec.portSize) put('仕様書作成', col + R.vport, spec.portSize + (spec.portScrew || ''));
     if (opt.supSpacerPipe) put('仕様書作成', col + ({ '1A': R.supSt, '2A': R.supSh, '3A': R.supLo }[opt.supSpacerPipe] || R.supSt), opt.supSpacerSize);
@@ -9306,11 +9407,26 @@ async function fillNewFormatSpec(file, entries, res) {
     if (R.perf && opt.residualPerf) put('仕様書作成', col + R.perf, 'O');
     if (R.bpAssy && opt.backpressAssy) put('仕様書作成', col + R.bpAssy, 'O');
     if (opt.reducValve && opt.reducValve.gauge) notes.push(n + '連目のスペーサ形減圧弁は仕様書作成シートで手動選択してください');
-    if (R.discS && opt.blockingDiscSup) { var ls = rowList[R.discS]; put('仕様書作成', col + R.discS, ls && ls[0] || 'O'); }
-    if (R.discE && opt.blockingDiscExh) { var le = rowList[R.discE]; put('仕様書作成', col + R.discE, le && le[0] || 'O'); }
     nSt++;
   }
   if (skipped.length) notes.push('仕様書作成シートの連の列が足りず ' + skipped.join('・') + '連目は記入していません');
+  // 単独SUP/EXHブロックの遮断位置（→）をツールでディスク指定していないときは、P,Eポート位置から決める
+  //   片側U: ブロックのU側境界／片側D: D側境界／両側B: 両側（ブックの必要数＝U/D はブロック数、B はブロック数＋1）
+  var pePos = (document.getElementById('sel-eport') || {}).value || 'U';
+  [['sup_block', 'blockingDiscSup', R.discS, hasSupBlk], ['exh_block', 'blockingDiscExh', R.discE, hasExhBlk]].forEach(function(bk){
+    if (!bk[3] || !bk[2]) return;
+    var anyDisc = false;
+    for (var k6 = 0; k6 < S.valveCount; k6++) if ((getValveSpec(k6).manifoldOpt || {})[bk[1]]) anyDisc = true;
+    if (anyDisc) return;
+    var mark = (rowList[bk[2]] || [])[0] || '→';
+    for (var k7 = 1; k7 <= S.valveCount; k7++) {
+      if ((getValveSpec(k7 - 1).manifoldOpt || {}).slot !== bk[0]) continue;
+      var c7 = pePos === 'U' ? k7 : pePos === 'D' ? k7 - 1 : 0;
+      if (c7 && stCol[c7] && c7 < S.valveCount) put('仕様書作成', stCol[c7] + bk[2], mark);
+    }
+    if (pePos === 'B') notes.push('P,E両側では単独ブロックの遮断位置（ブロックが受け持つ連の両端）をブロッキングディスクで指定してください（仕様書作成シートの「→」欄）');
+    else notes.push('単独' + (bk[0] === 'sup_block' ? 'SUP' : 'EXH') + '.ブロックの遮断位置（→）はブロックの' + pePos + '側の境界に記入しました（ブロックが' + (pePos === 'U' ? 'D' : 'U') + '側の連すべてを受け持つ配置）');
+  });
 
   // ── ④ EX600: 「I Oユニット部選択」シート（機種＝行・I/Oユニット位置1〜9＝列に「O」）──
   var ioName = Object.keys(rid).find(function(nm3){ return /ユニット部選択/.test(nm3); });
