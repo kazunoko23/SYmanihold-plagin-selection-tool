@@ -8982,6 +8982,322 @@ function _ofmStatus(msg, ok) {
 }
 
 // ─── 公式仕様書 自動記入 本体 ───
+// ════════════════════════════════════════════════════
+// v21 試作: SMC「新方式仕様書」（SMC-SS5Y…xlsx・数式入りの対話型ブック）への記入
+//   入力欄（ベース/バルブ シートの E列、仕様書作成 シートの連ごとの欄）に、入力規則リストの
+//   選択肢文字列をそのまま書き込む。品番・御発注用仕様書はブックの数式が Excel で再計算して組み立てる。
+//   ・ベースの設問は E3 の CONCATENATE(S…) の並び＝品番の並び。ツールの品番をこの並びに当てはめて
+//     設問ごとの記号を割り出し、その記号の選択肢文字列を書く（版ごとの設問の違いに強い）
+// ════════════════════════════════════════════════════
+function _nfFormulaMap(xml) {
+  var map = {}, re = /<c r="([A-Z]+\d+)"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g, m;
+  while ((m = re.exec(xml))) {
+    var fm = (m[3] || '').match(/<f[^>]*>([\s\S]*?)<\/f>/);
+    if (fm) map[m[1]] = _xmlUnesc(fm[1]);
+  }
+  return map;
+}
+function _nfDVs(xml) {
+  // 自己完結タグ（<dataValidation …/>＝リストなし）も区切って読む（読み違えると隣の設問のリストを取る）
+  var out = [], re = /<dataValidation(?=[\s/>])([^>]*?)(?:\/>|>([\s\S]*?)<\/dataValidation>)/g, m;
+  while ((m = re.exec(xml))) {
+    var sq = (m[1].match(/sqref="([^"]+)"/) || [])[1];
+    if (!sq) continue;
+    var f = (m[2] || '').match(/<formula1>([\s\S]*?)<\/formula1>/);
+    out.push({ sqref: sq, f1: f ? _xmlUnesc(f[1]) : '' });
+  }
+  // x14 拡張（<x14:dataValidation>…<xm:f>…</xm:f>…<xm:sqref>…）
+  var re2 = /<x14:dataValidation[^>]*>([\s\S]*?)<\/x14:dataValidation>/g;
+  while ((m = re2.exec(xml))) {
+    var f2 = m[1].match(/<xm:f>([\s\S]*?)<\/xm:f>/), sq = m[1].match(/<xm:sqref>([\s\S]*?)<\/xm:sqref>/);
+    if (f2 && sq) out.push({ sqref: sq[1], f1: _xmlUnesc(f2[1]) });
+  }
+  return out;
+}
+function _nfNumToCol(n) { var s = ''; while (n > 0) { var r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; }
+// "$AF$25:$AR$25" → ["AF25",…]（同一シート内の範囲のみ）
+function _nfRangeRefs(rng) {
+  var m = String(rng || '').replace(/\$/g, '').match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);
+  if (!m) return [];
+  var c1 = _colToNum(m[1]), r1 = +m[2], c2 = m[3] ? _colToNum(m[3]) : c1, r2 = m[4] ? +m[4] : r1, out = [];
+  for (var r = r1; r <= r2; r++) for (var c = c1; c <= c2; c++) out.push(_nfNumToCol(c) + r);
+  return out;
+}
+function _nfSqrefRefs(sq) {
+  var out = [];
+  String(sq).split(/\s+/).forEach(function(part){ out = out.concat(_nfRangeRefs(part)); });
+  return out;
+}
+// 数値セル書き込み（切換方式 1〜5・配線 1/2 などブック側が数値で比較している欄）
+function _nfSetNum(xml, ref, num) {
+  var col = ref.match(/^[A-Z]+/)[0], row = parseInt(ref.match(/\d+$/)[0], 10);
+  var cellRe = new RegExp('<c r="' + ref + '"([^>]*?)(?:/>|>[\\s\\S]*?</c>)');
+  var m = xml.match(cellRe);
+  if (m) {
+    var attrs = m[1].replace(/ t="[^"]*"/, '');
+    return xml.replace(cellRe, '<c r="' + ref + '"' + attrs + '><v>' + num + '</v></c>');
+  }
+  // 無いセルは文字列で一旦作ってから数値に置き換える（行・列順の挿入は _setSheetCell に任せる）
+  var x2 = _setSheetCell(xml, ref, String(num));
+  return x2.replace(new RegExp('<c r="' + ref + '"([^>]*?) t="inlineStr"><is><t xml:space="preserve">' + num + '</t></is></c>'),
+    '<c r="' + ref + '"$1><v>' + num + '</v></c>');
+}
+
+async function fillNewFormatSpec(file, entries, res) {
+  var wbXml = await _zipEntryText(entries, 'xl/workbook.xml');
+  var relXml = await _zipEntryText(entries, 'xl/_rels/workbook.xml.rels');
+  var sst = _parseSharedStrings(await _zipEntryText(entries, 'xl/sharedStrings.xml'));
+  var rid = {}, mm, re1 = /<sheet [^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g;
+  while ((mm = re1.exec(wbXml))) rid[_xmlUnesc(mm[1])] = mm[2];
+  var tgt = {}, re2 = /<Relationship [^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g;
+  while ((mm = re2.exec(relXml))) tgt[mm[1]] = mm[2];
+  var re2b = /<Relationship [^>]*Target="([^"]+)"[^>]*Id="([^"]+)"/g;
+  while ((mm = re2b.exec(relXml))) tgt[mm[2]] = mm[1];
+  function sheetPath(name) { var t = tgt[rid[name]]; return t ? ('xl/' + t.replace(/^\/?xl\//, '').replace(/^\//, '')) : null; }
+  var SH = {};
+  for (var nm of ['ベース', 'バルブ', '仕様書作成']) {
+    var pth = sheetPath(nm);
+    if (!pth) { alert('新方式仕様書の「' + nm + '」シートが見つかりません'); return; }
+    var x = await _zipEntryText(entries, pth);
+    SH[nm] = { path: pth, xml: x, cells: _sheetCellMap(x, sst), f: _nfFormulaMap(x), dv: _nfDVs(x) };
+  }
+  var notes = [], nWrite = 0;
+  function put(sh, ref, val, asNum) {
+    if (val === '' || val === null || val === undefined) return;
+    SH[sh].xml = asNum ? _nfSetNum(SH[sh].xml, ref, val) : _setSheetCell(SH[sh].xml, ref, val);
+    nWrite++;
+  }
+  function rowOf(ref) { return parseInt(ref.match(/\d+$/)[0], 10); }
+  function colOf2(ref) { return ref.match(/^[A-Z]+/)[0]; }
+  function dvListFor(sh, ref) {
+    var d = SH[sh].dv.find(function(x){ return _nfSqrefRefs(x.sqref).indexOf(ref) >= 0; });
+    if (!d) return null;
+    return _nfRangeRefs(d.f1);
+  }
+
+  // ── ① ベース: E3 の CONCATENATE 並び × ツール品番 ──
+  var B = SH['ベース'];
+  var e3 = B.f['E3'] || '';
+  var lists = [], lm, lre = /CONCATENATE\(([^)]*)\)/g;
+  while ((lm = lre.exec(e3))) lists.push(lm[1].split(',').map(function(s){ return s.trim().replace(/\$/g, ''); }));
+  if (!lists.length) { alert('新方式仕様書の「ベース」シートの品番式（E3）を読めませんでした'); return; }
+  var reqE0 = {}; (e3.match(/E\d+=""/g) || []).forEach(function(t){ reqE0[t.replace('=""', '')] = 1; });
+  function buildItems(list) {
+    return list.map(function(sref) {
+      var r = rowOf(sref), rf = B.f['R' + r], rv = B.cells['R' + r], sf = B.f['S' + r] || '';
+      // S列が「R をそのまま出す」標準形でなく "-" を条件で出す式なら、条件付きのハイフン（12型の S61 等）
+      if (sf && /"-"/.test(sf) && !/IF\(R\d+="","",IF\(R\d+="無記号","",R\d+\)\)/.test(sf.replace(/\$/g, ''))) return { kind: 'opt', r: r, opts: [{ code: '-' }, { code: '' }] };
+      if (rf && /INDEX\(/.test(rf)) {
+        var im = rf.replace(/\$/g, '').match(/INDEX\(([A-Z]+)(\d+):([A-Z]+)(\d+)/);
+        if (!im) return { kind: 'skip', r: r };
+        var codeRow = +im[2], c1 = _colToNum(im[1]), c2 = _colToNum(im[3]);
+        var labRefs = dvListFor('ベース', 'E' + r) || [];
+        var labRow = labRefs.length ? rowOf(labRefs[0]) : codeRow - 1;
+        var opts = [];
+        for (var c = c1; c <= c2; c++) {
+          var col = _nfNumToCol(c), lab = B.cells[col + labRow], code = B.cells[col + codeRow];
+          if (lab === undefined || code === undefined) continue;
+          opts.push({ code: code === '無記号' ? '' : String(code), label: lab, idx: opts.length });
+        }
+        if (!opts.length) return { kind: 'skip', r: r };             // 選択肢の無い設問（この配線では使わない欄）
+        // 必須でない設問（E3 で空欄チェックされない欄）は空欄＝記号なしもあり得る
+        if (!reqE0['E' + r] && !opts.some(function(o){ return o.code === ''; })) opts.push({ code: '', label: null, idx: -1 });
+        return { kind: 'choice', r: r, opts: opts };
+      }
+      if (rf) return { kind: 'opt', r: r, opts: [{ code: '-' }, { code: '' }] };   // 条件付きの「-」
+      if (rv !== undefined) return { kind: 'fixed', r: r, code: rv === '無記号' ? '' : String(rv) };
+      return { kind: 'skip', r: r };
+    });
+  }
+  function matchPN(items, pn) {
+    var asg = [];
+    function rec(i, pos) {
+      if (i === items.length) return pos === pn.length;
+      var it = items[i];
+      if (it.kind === 'skip') return rec(i + 1, pos);
+      if (it.kind === 'fixed') return pn.substr(pos, it.code.length) === it.code && rec(i + 1, pos + it.code.length);
+      var cands = it.opts.slice().sort(function(a, b){ return b.code.length - a.code.length; });
+      for (var k = 0; k < cands.length; k++) {
+        var o = cands[k];
+        if (pn.substr(pos, o.code.length) !== o.code) continue;
+        asg[i] = o;
+        if (rec(i + 1, pos + o.code.length)) return true;
+      }
+      asg[i] = undefined;
+      return false;
+    }
+    return rec(0, 0) ? asg : null;
+  }
+  // 品番式は配線の条件で並びが2通りある（例 EX260: SIなしは出力特性 S34 を含まない）。当てはまる並びのうち設問の多いほうを使う
+  var pnBase = res.full, items = null, asg = null, bestN = -1;
+  for (var li = 0; li < lists.length; li++) {
+    var it2 = buildItems(lists[li]), a2 = matchPN(it2, pnBase);
+    var nC = it2.filter(function(x){ return x.kind === 'choice'; }).length;
+    if (a2 && nC > bestN) { items = it2; asg = a2; bestN = nC; }
+  }
+  if (!asg) {
+    alert('この新方式仕様書の型式表示に、選定品番 ' + pnBase + ' を当てはめられませんでした。\n'
+      + 'シリーズ・型・配線方式が仕様書と合っているか確認してください。');
+    return;
+  }
+  var wiringCode = '';
+  // 無記号の選択肢は、品番式が「空欄は入力漏れ」としている欄（E3 の E□="" の欄）にだけ書く
+  //（DINレール長さ等は直接取付では空欄のままが正しい＝書くとブック側でエラー）
+  var reqE = {}; (e3.match(/E\d+=""/g) || []).forEach(function(t){ reqE[t.replace('=""', '')] = 1; });
+  items.forEach(function(it, i){
+    if (it.kind !== 'choice' || !asg[i]) return;
+    var o = asg[i];
+    if (o.code === '' && (!reqE['E' + it.r] || o.label === null)) return;
+    // 同じ記号の選択肢が複数ある設問（コネクタ取出し向き 1/2 とリード線長さ 1/2/3）は配線方式で選び分け
+    var same = it.opts.filter(function(x){ return x.code === o.code; });
+    if (same.length > 1) o = /^L\d/.test(wiringCode) ? same[same.length - 1] : same[0];
+    if (/^(F|FW|P|PG|PH|J|G|L\d|M|T|TC)$/.test(o.code) && !wiringCode) wiringCode = o.code;
+    put('ベース', 'E' + it.r, o.label);
+  });
+  // DINレール長さ等で無記号（空）の設問は既定値のままで良い
+
+  // ── ② バルブ: 共通の設問（シール・電圧・ランプ・マニュアル・取付ねじ・オーダーメイド）──
+  var V = SH['バルブ'];
+  var specs = [];
+  for (var vi = 0; vi < S.valveCount; vi++) {
+    var vt0 = S.valveTypes[vi] || 'single', sp0 = getValveSpec(vi), op0 = sp0.manifoldOpt || {};
+    if (vt0 !== 'blank' && !op0.slot) specs.push(sp0);
+  }
+  function common(field, dflt) {
+    var vals = specs.map(function(s){ return (s[field] === undefined || s[field] === null) ? dflt : String(s[field]); });
+    var u = vals.filter(function(v, i){ return vals.indexOf(v) === i; });
+    return u.length === 1 ? u[0] : (u.length ? '■' : dflt);
+  }
+  var vAns = {
+    'クリーン': '', 'シール方式': common('seal', '0'), '定格電圧': common('voltage', '5'),
+    'ランプ': common('lamp', ''), 'マニュアル': common('manual', ''), '取付オプション': common('screw', ''),
+    'オーダーメイド': specs.some(function(s){ return s.fluoroRubber; }) ? '-X90' : ''
+  };
+  var vSeal = vAns['シール方式'], vMan = vAns['マニュアル'];
+  Object.keys(V.cells).forEach(function(ref) {
+    if (colOf2(ref) !== 'C') return;
+    var r = rowOf(ref), lab = String(V.cells[ref]);
+    var key = Object.keys(vAns).find(function(k){ return lab.indexOf(k) >= 0; });
+    if (!key) return;
+    var lr = dvListFor('バルブ', 'E' + r);
+    if (!lr || !lr.length) {   // 入力規則にリストが無い設問は AF列以降の選択肢の行（下の行が記号）から読む
+      lr = [];
+      for (var cc2 = _colToNum('AF'); cc2 <= _colToNum('BB'); cc2++) {
+        var cr2 = _nfNumToCol(cc2) + r;
+        if (V.cells[cr2] !== undefined && V.cells[_nfNumToCol(cc2) + (r + 1)] !== undefined) lr.push(cr2);
+      }
+      if (!lr.length) return;
+    }
+    var ans = vAns[key];
+    if (ans === '■' && (key === 'ランプ' || key === '定格電圧' || key === '取付オプション')) {
+      notes.push('「' + key + '」が連ごとに違うため、この仕様書では表せません（1連目の値を記入）');
+      ans = String(specs[0][{ 'ランプ': 'lamp', '定格電圧': 'voltage', '取付オプション': 'screw' }[key]] || '');
+    }
+    var hit = lr.find(function(cr){ var code = V.cells[colOf2(cr) + (rowOf(cr) + 1)]; code = code === '無記号' ? '' : String(code === undefined ? '' : code); return code === ans; });
+    if (hit && V.cells[hit] !== undefined) put('バルブ', 'E' + r, V.cells[hit]);
+    else notes.push('バルブ「' + key + '」の記号 ' + (ans || '無記号') + ' が仕様書の選択肢にありません');
+  });
+
+  // ── ③ 仕様書作成: 連ごとの欄 ──
+  var P = SH['仕様書作成'];
+  var dRef = Object.keys(P.cells).find(function(r){ return String(P.cells[r]).replace(/\s/g, '') === 'D側'; });
+  var stCol = {};
+  if (dRef) {
+    // D側の列の直後から 1,2,3… と並ぶ行（同じ行の右端の計算用セルの数値は拾わない）
+    var dC = _colToNum(colOf2(dRef));
+    for (var hr = rowOf(dRef); hr <= rowOf(dRef) + 4 && !stCol[1]; hr++) {
+      var expect = 1;
+      for (var cc = dC + 1; cc <= dC + 80; cc++) {
+        var v = P.cells[_nfNumToCol(cc) + hr];
+        if (v === undefined) continue;
+        if (String(v).trim() === String(expect)) { stCol[expect] = _nfNumToCol(cc); expect++; }
+        else break;
+      }
+      if (!stCol[2]) stCol = {};
+    }
+  }
+  if (!stCol[1]) { alert('仕様書作成シートの連番（1連目＝D側）を見つけられませんでした'); return; }
+  // 行の役割を入力規則のリストとC列の見出しで決める
+  var rowList = {};
+  P.dv.forEach(function(d){
+    var vals = _nfRangeRefs(d.f1).map(function(r){ return P.cells[r]; }).filter(function(v){ return v !== undefined; });
+    _nfSqrefRefs(d.sqref).forEach(function(r){ if (stCol[1] && _colToNum(colOf2(r)) >= _colToNum(stCol[1])) rowList[rowOf(r)] = vals; });
+  });
+  function cLabel(r) { return String(P.cells['C' + r] || '') + String(P.cells['B' + r] || ''); }
+  function findRow(pred) { return Object.keys(rowList).map(Number).sort(function(a,b){ return a-b; }).find(function(r){ return pred(rowList[r].join(','), r); }) || 0; }
+  var R = {
+    sw:    findRow(function(s){ return /(^|,)1,2,3,4,5,A/.test(s); }),
+    seal:  findRow(function(s){ return s === '0,1'; }),
+    man:   findRow(function(s){ return s === 'D,E,F'; }),
+    pilot: findRow(function(s){ return s === 'R'; }),
+    bp:    findRow(function(s){ return s === 'H'; }),
+    pOpt:  findRow(function(s){ return s === 'B,K'; }),
+    coil:  findRow(function(s){ return s === 'T'; }),
+    wire:  findRow(function(s){ return s === '1,2'; })
+  };
+  function labelRow(word, after) { var r = Object.keys(P.cells).filter(function(k){ return colOf2(k) === 'C' && String(P.cells[k]).indexOf(word) >= 0 && rowOf(k) > (after || 0); }).map(rowOf).sort(function(a,b){ return a-b; })[0]; return r || 0; }
+  R.blank = labelRow('ブランキングプレート');
+  R.stop = labelRow('ストップ弁スペーサ'); R.perf = labelRow('パーフェクトスペーサ'); R.bpAssy = labelRow('背圧防止弁');
+  var rSup = labelRow('単独SUP.スペーサ'), rExh = labelRow('単独EXH.スペーサ');
+  R.supSt = labelRow('配管ストレート', rSup); R.supSh = labelRow('ショートエルボ', rSup); R.supLo = labelRow('ロングエルボ', rSup);
+  R.exhSt = labelRow('配管ストレート', rExh); R.exhSh = labelRow('ショートエルボ', rExh); R.exhLo = labelRow('ロングエルボ', rExh);
+  R.discS = labelRow('SUP.ブロッキングディスク'); R.discE = labelRow('EXH.ブロッキングディスク');
+  R.supBlk = labelRow('単独SUP.ブロック'); R.exhBlk = labelRow('単独EXH.ブロック');
+  // 上配管形（12/52型）: 連ごとのバルブ口径（バルブ品番の口径記号＋ねじ種類）
+  R.vport = (S.pipe === '上配管') ? labelRow('A,Bポート管接続口径') : 0;
+  var rMatch = labelRow('2連マッチング継手');
+  R.mix = rMatch ? findRow(function(s, r){ return r > rMatch && /(^|,)C\d/.test(s) && s.split(',').length >= 4; }) : 0;
+  var nSt = 0, skipped = [];
+  for (var n = 1; n <= S.valveCount; n++) {
+    var col = stCol[n];
+    if (!col) { skipped.push(n); continue; }
+    var spec = getValveSpec(n - 1), opt = spec.manifoldOpt || {}, vt = S.valveTypes[n - 1] || 'single';
+    if (vt === 'blank' || opt.slot === 'blanking') { if (R.blank) put('仕様書作成', col + R.blank, 'O'); nSt++; continue; }
+    if (opt.slot) { notes.push(n + '連目のスロット品（' + opt.slot + '）は手動で記入してください'); continue; }
+    var swc = getSwitchCode(vt);
+    if (R.sw) put('仕様書作成', col + R.sw, /^\d$/.test(swc) ? +swc : swc, /^\d$/.test(swc));
+    if (R.seal && vSeal === '■') put('仕様書作成', col + R.seal, +(spec.seal || '0'), true);
+    if (R.man && vMan === '■' && spec.manual) put('仕様書作成', col + R.man, spec.manual);
+    if (R.pilot && spec.pilot === 'R') put('仕様書作成', col + R.pilot, 'R');
+    if (R.bp && spec.backpress === 'H') put('仕様書作成', col + R.bp, 'H');
+    if (R.pOpt && spec.pilotOpt) put('仕様書作成', col + R.pOpt, spec.pilotOpt);
+    if (R.coil && spec.coil === 'T') put('仕様書作成', col + R.coil, 'T');
+    if (R.wire) put('仕様書作成', col + R.wire, vt === 'single' ? 1 : 2, true);
+    if (R.mix && isAbMix() && spec.portSize) put('仕様書作成', col + R.mix, spec.portSize);
+    if (R.vport && spec.portSize) put('仕様書作成', col + R.vport, spec.portSize + (spec.portScrew || ''));
+    if (opt.supSpacerPipe) put('仕様書作成', col + ({ '1A': R.supSt, '2A': R.supSh, '3A': R.supLo }[opt.supSpacerPipe] || R.supSt), opt.supSpacerSize);
+    if (opt.exhSpacerPipe) put('仕様書作成', col + ({ '1A': R.exhSt, '2A': R.exhSh, '3A': R.exhLo }[opt.exhSpacerPipe] || R.exhSt), opt.exhSpacerSize);
+    if (R.stop && opt.residualStop) put('仕様書作成', col + R.stop, 'O');
+    if (R.perf && opt.residualPerf) put('仕様書作成', col + R.perf, 'O');
+    if (R.bpAssy && opt.backpressAssy) put('仕様書作成', col + R.bpAssy, 'O');
+    if (opt.reducValve && opt.reducValve.gauge) notes.push(n + '連目のスペーサ形減圧弁は仕様書作成シートで手動選択してください');
+    if (R.discS && opt.blockingDiscSup) { var ls = rowList[R.discS]; put('仕様書作成', col + R.discS, ls && ls[0] || 'O'); }
+    if (R.discE && opt.blockingDiscExh) { var le = rowList[R.discE]; put('仕様書作成', col + R.discE, le && le[0] || 'O'); }
+    nSt++;
+  }
+  if (skipped.length) notes.push('仕様書作成シートの連の列が足りず ' + skipped.join('・') + '連目は記入していません');
+
+  // ── 書き出し: 開いたときに全数式を再計算させる ──
+  var wb2 = /<calcPr[^>]*\/>/.test(wbXml)
+    ? wbXml.replace(/<calcPr([^>]*?)\s*\/>/, function(all, a){ return '<calcPr' + a.replace(/\s*fullCalcOnLoad="[^"]*"/, '') + ' fullCalcOnLoad="1"/>'; })
+    : wbXml.replace('</workbook>', '<calcPr fullCalcOnLoad="1"/></workbook>');
+  var repl = {}; repl['xl/workbook.xml'] = new TextEncoder().encode(wb2);
+  ['ベース', 'バルブ', '仕様書作成'].forEach(function(nm2){ repl[SH[nm2].path] = new TextEncoder().encode(SH[nm2].xml); });
+  // 計算結果のキャッシュ（calcChain）は残すと古い値が表示されることがあるので外す必要はない（fullCalcOnLoad で再計算）
+  var out = _zipBuild(entries, repl);
+  var blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '記入済_' + file.name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+  _ofmStatus('✓ 新方式仕様書に記入 — 「記入済_' + file.name + '」（' + nWrite + 'セル）', true);
+  alert('新方式仕様書に記入しました（' + nWrite + 'セル・' + nSt + '連分）。\n'
+    + 'Excel で開くと数式が再計算され、「ベース」「バルブ」シートの型式と「御発注用仕様書」が組み上がります。\n'
+    + '型式が ' + pnBase + ' になっているか確認してください。'
+    + (notes.length ? '\n\n' + notes.map(function(s){ return '・' + s; }).join('\n') : ''));
+}
+
 async function fillOfficialSpecForm(file) {
   try {
     if (!file) return;
@@ -9025,6 +9341,12 @@ async function fillOfficialSpecForm(file) {
       return;
     }
 
+    // v21 試作: 新方式仕様書（SMC-SS5Y…・「ベース」「仕様書作成」シートを持つ対話型ブック）
+    var _wbx = await _zipEntryText(entries, 'xl/workbook.xml');
+    if (_wbx && _wbx.indexOf('name="ベース"') >= 0 && _wbx.indexOf('name="仕様書作成"') >= 0) {
+      await fillNewFormatSpec(file, entries, res);
+      return;
+    }
     // ── テンプレート検出・整合チェック ──
     var title = '';
     keys.forEach(function(r){ if (!title && String(cells[r]).indexOf('マニホールド仕様書') >= 0) title = cells[r]; });
