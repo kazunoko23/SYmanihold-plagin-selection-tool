@@ -7343,7 +7343,9 @@ function getStationOptionIssues() {
   var out = [], tn = getTypeNum(), side = (tn === '10' || tn === '11');
   if (S.base !== 'conn') return out;
   var abUp = side && (S.abDir === 'EL_UP' || /^LN?\d/.test(S.abCode || ''));
-  var push = function(msg, n){ var e = out.find(function(x){ return x.msg === msg; }); if (e) e.st.push(n); else out.push({ msg: msg, st: [n] }); };
+  var push = function(msg, n){ var e = out.find(function(x){ return x.msg === msg; }); if (e) e.st.push(n); else out.push({ msg: msg, st: [n], warn: /残圧が抜け/.test(msg) }); };
+  var special = S.wiring && EPORT_SPECIAL_WIRINGS.indexOf(S.wiring) >= 0;
+  var extBase = special ? (S.eportPilot === 'ext') : (S.eportAssy === 'R');
   for (var i = 0; i < (S.valveCount || 0); i++) {
     var sp = getValveSpec(i), o = sp.manifoldOpt || {}, t = S.valveTypes[i] || sp.type || 'single';
     if (o.slot || t === 'blank') continue;
@@ -7362,6 +7364,9 @@ function getStationOptionIssues() {
     if (side && S.mountPlate && any) push('銘板プレート付（AA/BA/A□/B□）はスペーサ類不可', n);
     if (abUpSt && (sup || exh || st || pf)) push('A,Bポートがエルボ上向きの連はスペーサ類不可（配管と干渉）', n);
     if ((sp.screw === 'B' || sp.screw === 'H') && !st && (sup || exh || pf || rv)) push('取付ねじ B/H（六角穴付ボルト）はスペーサ類不可', n);
+    // カタログ p.618 ストップ弁スペーサ 注3）外部パイロットエアは遮断できない＝内部パイロット仕様専用／注4）3位置CCは残圧が抜けない
+    if (st && extBase) push('ストップ弁スペーサは内部パイロット仕様のマニホールド専用', n);
+    if (st && t === '3cs') push('3位置クローズドセンタにストップ弁スペーサ: 残圧が抜けない（A,B側に3ポート弁等を併用）', n);
   }
   return out;
 }
@@ -7402,7 +7407,7 @@ function updateCompatList() {
     for (var ei = 0; ei < (S.valveCount || 0); ei++) { var es = getValveSpec(ei); if (!(es.manifoldOpt || {}).slot && S.valveTypes[ei] !== 'blank' && es.pilot === 'R') extN++; }
     if (extN) checks.push({ label: '51型（裏配管）: 外部パイロット(R)のバルブは使えない（50R 横配管のみ）', ok: false });
   }
-  getStationOptionIssues().forEach(function(x){ checks.push({ label: x.msg + '（' + x.st.join('・') + '連目）', ok: false }); });
+  getStationOptionIssues().forEach(function(x){ checks.push({ label: x.msg + '（' + x.st.join('・') + '連目）', ok: x.warn ? null : false }); });
   // v21: 口径混合（CM/LM/M）の連ごとの口径にミリとインチを混ぜない（SMC新方式仕様書「ミリ・インチの混合は不可」）
   if (S.abCode === 'CM' || S.abCode === 'LM' || S.abCode === 'M') {
     var mmN = 0, inN = 0;
