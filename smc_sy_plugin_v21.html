@@ -5462,6 +5462,8 @@ function buildPN() {
   // 混合取付タイプの注記
   if (S.base === 'mixed') {
     notes.unshift('混合取付: SS5Y5＝SY3000/5000混合（口径例 C86）/ SS5Y7＝SY5000/7000混合（口径例 C128）。口径記号＝[大バルブ側][小バルブ側]の2桁（参照 p.574〜587）');
+    // v21: 連ごとのバルブサイズは未対応（全連が主系列のバルブ）。SMC新方式仕様書は「全連が主系列なら専用ベースを使用」と判定
+    notes.unshift('⚠ 混合取付: 連ごとのバルブサイズ（SY' + (S.series === '7' ? '5000' : '3000') + ' の連）とマニホールドオプションは未対応。表示は全連 SY' + S.series + '000。小さいほうのバルブの連・スペーサ等は公式仕様書で指示');
   }
 
   // 取付方法コード
@@ -7344,6 +7346,7 @@ function updateCompatList() {
   const checks = [
     { label:'SY3000+コネクタベース+裏配管 非対応', ok: !(S.series==='3' && S.base==='conn' && S.pipe==='裏配管') },
     { label:'混合取付: SY5000(3000/5000混合)/SY7000(5000/7000混合)を選択', ok: S.base!=='mixed' || S.series!=='3', hide: S.base!=='mixed' },
+    { label:'混合取付: 連ごとのバルブサイズ・オプションは未対応（公式仕様書で指示）', ok: null, hide: S.base!=='mixed' },
     { label:`配線方式 適合`, ok: S.wiring ? (compat && compat[S.wiring]==='●') : null },
     { label:`バルブ連数 ${S.valveCount}連 ≤ 上限${lim.st}連`, ok: S.valveCount>=2 && S.valveCount<=lim.st },
     { label:`ソレノイド数 ${solUsed}点 ≤ 上限${lim.sol}点`, ok: S.wiring ? solUsed <= lim.sol : null },
@@ -9367,6 +9370,7 @@ async function fillNewFormatSpec(file, entries, res) {
   R.vport = (S.pipe === '上配管') ? (labelRow('A,Bポート管接続口径') || labelRow('Ａ，Ｂポート')) : 0;
   // 混合取付（M10/11/12型）: 連ごとのバルブサイズ（3/5 または 5/7）。ツールの搭載バルブは全連 S.series
   R.vsize = (S.base === 'mixed') ? findRow(function(s){ return s === '3,5' || s === '5,7'; }) : 0;
+  if (S.base === 'mixed') notes.push('混合取付: 連ごとのバルブサイズはツール未対応のため全連 ' + S.series + ' で記入。小さいほうのバルブの連は仕様書作成シートでサイズを変更');
   var rMatch = labelRow('2連マッチング継手');
   R.mix = rMatch ? findRow(function(s, r){ return r > rMatch && /(^|,)K?C\d/.test(s) && s.split(',').length >= 4; }) : 0;
   // 配線個別指定（シングル/ダブル）は、ブックが必須とするとき（連数 > 配線方式の最大点数÷2）だけ全連に書く。
