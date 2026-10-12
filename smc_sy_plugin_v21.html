@@ -4828,17 +4828,20 @@ function renderVeOptBody() {
           + '<div style="font-size:8px;color:#94a3b8;">供給遮断＋残圧排気 / 品番: ' + getOptPN('residual_stop', series, {}) + '</div></div>'
           + '</div>';
 
-    // 残圧排気弁付 パーフェクトスペーサ（2位置のみ）
-    var rpAvail = availKeys.indexOf('residual_perf') >= 0 && !is3pos;
-    var rpSel = opt.residualPerf && !is3pos;
+    // 残圧排気弁付 パーフェクトスペーサ（2位置・3位置エキゾーストセンタ）
+    //   v21: カタログ p.619「3位置のクローズドセンタ・プレッシャセンタのバルブとの組合わせはできません」・適用バルブ 2位置/3位置EC。
+    //   SMC新方式仕様書・WEB版仕様書も 3/5/A/B/C 不可。v20 までは 3位置EC（中間停止用＝本来の用途）まで不可にしていた
+    var rpNg = ['3cs','3ps','4pos','dual','3port'].indexOf(spec.type) >= 0;
+    var rpAvail = availKeys.indexOf('residual_perf') >= 0 && !rpNg;
+    var rpSel = opt.residualPerf && !rpNg;
     html += '<div onclick="' + (rpAvail?'setValveOpt('+idx+',\'residualPerf\',true)':'') + '" '
           + 'style="display:flex;align-items:center;gap:8px;margin-bottom:4px;padding:5px 8px;border-radius:5px;cursor:' + (rpAvail?'pointer':'default') + ';'
           + 'background:' + (rpSel?'#ebf3ff':rpAvail?'#fff':'#f8fafc') + ';border:1.5px solid ' + (rpSel?'var(--blue)':rpAvail?'var(--border)':'#e8ecf4') + ';opacity:' + (rpAvail?1:.45) + ';">'
           + '<div style="width:14px;height:14px;border-radius:3px;border:1.5px solid ' + (rpSel?'var(--blue)':'var(--border)') + ';background:' + (rpSel?'var(--blue)':'#fff') + ';flex-shrink:0;display:flex;align-items:center;justify-content:center;">'
           + (rpSel?'<span style="color:#fff;font-size:10px;font-weight:800;">✓</span>':'') + '</div>'
           + '<div><div style="font-size:9px;font-weight:700;color:' + (rpAvail?'var(--text)':'#bbb') + ';">残圧排気弁付パーフェクトスペーサ'
-          + (is3pos?' <span style="color:#e84040;font-weight:400;">3位置不可</span>':(rpAvail?'':' ●なし')) + '</div>'
-          + '<div style="font-size:8px;color:#94a3b8;">SUP./EXH.遮断＋残圧排気（2位置のみ）/ 品番: ' + getOptPN('residual_perf', series, {}) + '</div></div>'
+          + (rpNg?' <span style="color:#e84040;font-weight:400;">CC・PC・4位置不可</span>':(rpAvail?'':' ●なし')) + '</div>'
+          + '<div style="font-size:8px;color:#94a3b8;">SUP./EXH.遮断＋残圧排気（2位置・3位置EC）/ 品番: ' + getOptPN('residual_perf', series, {}) + '</div></div>'
           + '</div>';
 
     // ─── スペーサ形減圧弁 ───
@@ -7334,6 +7337,35 @@ function updateVarTitle() {
   el.innerHTML = `<span>${typ}型</span><span class="vt-sep">｜</span><span>${S.pipe}</span><span class="vt-sep">｜</span><span>${wName}</span>`;
 }
 
+// v21: 連ごとのスペーサ類の組合せ（SMC新方式仕様書 SMC-SS5Y□-10/11 の判定式＝仕様書作成シートの検査行。
+//   WEB版仕様書（バルブマニホールドコンフィギュレータ 10型）の利用条件とも一致するものだけ）
+function getStationOptionIssues() {
+  var out = [], tn = getTypeNum(), side = (tn === '10' || tn === '11');
+  if (S.base !== 'conn') return out;
+  var abUp = side && (S.abDir === 'EL_UP' || /^LN?\d/.test(S.abCode || ''));
+  var push = function(msg, n){ var e = out.find(function(x){ return x.msg === msg; }); if (e) e.st.push(n); else out.push({ msg: msg, st: [n] }); };
+  for (var i = 0; i < (S.valveCount || 0); i++) {
+    var sp = getValveSpec(i), o = sp.manifoldOpt || {}, t = S.valveTypes[i] || sp.type || 'single';
+    if (o.slot || t === 'blank') continue;
+    var sup = o.supSpacerPipe || '', exh = o.exhSpacerPipe || '', st = !!o.residualStop, pf = !!o.residualPerf;
+    var rv = !!(o.reducValve && o.reducValve.gauge), n = i + 1;
+    var any = !!(sup || exh || st || pf || rv);
+    if (!any) continue;
+    var abUpSt = abUp || (side && /^LN?\d/.test(sp.portSize || ''));
+    if ((sup ? 1 : 0) + (exh ? 1 : 0) + st + pf + rv > 3) push('スペーサ類は1連3段まで', n);
+    if (sup && exh && (sup !== '1A' || exh !== '1A')) push('単独SUP/EXHスペーサの2段重ねは両方ストレート(1A)のみ', n);
+    if ((sup === '2A' || exh === '2A') && ['3cs','3es','3ps'].indexOf(t) >= 0) push('ショートエルボのスペーサは3位置バルブ不可', n);
+    if ((st || pf) && (sup === '2A' || exh === '2A' || rv)) push('ストップ弁/パーフェクトスペーサはショートエルボのスペーサ・減圧弁と重ねられない', n);
+    if (rv && ((sup && exh) || (sup && sup !== '1A') || (exh && exh !== '1A'))) push('スペーサ形減圧弁と重ねられるのはストレートの単独SUPか単独EXHのどちらか1つ', n);
+    if (pf && ['3cs','3ps','4pos','dual','3port'].indexOf(t) >= 0) push('パーフェクトスペーサは2位置・3位置エキゾーストセンタのみ', n);
+    if (rv && /^[AB]1$/.test((o.reducValve || {}).port || '') && ['3cs','3ps','4pos','dual','3port'].indexOf(t) >= 0) push('減圧弁 A1/B1（A/B減圧）はこの切換方式と組合せ不可', n);
+    if (side && S.mountPlate && any) push('銘板プレート付（AA/BA/A□/B□）はスペーサ類不可', n);
+    if (abUpSt && (sup || exh || st || pf)) push('A,Bポートがエルボ上向きの連はスペーサ類不可（配管と干渉）', n);
+    if ((sp.screw === 'B' || sp.screw === 'H') && !st && (sup || exh || pf || rv)) push('取付ねじ B/H（六角穴付ボルト）はスペーサ類不可', n);
+  }
+  return out;
+}
+
 function updateCompatList() {
   const list = document.getElementById('compat-list');
   if (!S.series || !S.base || !S.pipe) {
@@ -7370,6 +7402,7 @@ function updateCompatList() {
     for (var ei = 0; ei < (S.valveCount || 0); ei++) { var es = getValveSpec(ei); if (!(es.manifoldOpt || {}).slot && S.valveTypes[ei] !== 'blank' && es.pilot === 'R') extN++; }
     if (extN) checks.push({ label: '51型（裏配管）: 外部パイロット(R)のバルブは使えない（50R 横配管のみ）', ok: false });
   }
+  getStationOptionIssues().forEach(function(x){ checks.push({ label: x.msg + '（' + x.st.join('・') + '連目）', ok: false }); });
   // v21: 口径混合（CM/LM/M）の連ごとの口径にミリとインチを混ぜない（SMC新方式仕様書「ミリ・インチの混合は不可」）
   if (S.abCode === 'CM' || S.abCode === 'LM' || S.abCode === 'M') {
     var mmN = 0, inN = 0;

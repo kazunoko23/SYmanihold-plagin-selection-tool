@@ -57,11 +57,11 @@ new Function(
  __ex.getEportStationMax=getEportStationMax; __ex.getWiringLimits=getWiringLimits;
  __ex.getMountCode=getMountCode; __ex.getAbActualCode=getAbActualCode; __ex.AB_COMPAT=AB_COMPAT;
  __ex.getValveSpec=getValveSpec; __ex.veSet=veSet; __ex.renderAbPortBody=renderAbPortBody;
- __ex.updateMetalPeWrap=updateMetalPeWrap; __ex.getMixPortOpts=getMixPortOpts; __ex.parseManifoldPN=parseManifoldPN; __ex.getSiCommonRestriction=getSiCommonRestriction; __ex.getDefaultSlotElbowUnit=getDefaultSlotElbowUnit;`
+ __ex.updateMetalPeWrap=updateMetalPeWrap; __ex.getMixPortOpts=getMixPortOpts; __ex.parseManifoldPN=parseManifoldPN; __ex.getSiCommonRestriction=getSiCommonRestriction; __ex.getDefaultSlotElbowUnit=getDefaultSlotElbowUnit; __ex.getStationOptionIssues=getStationOptionIssues;`
 )(globalThis.document, globalThis.window, globalThis.alert, globalThis.localStorage,
   globalThis.navigator, globalThis.XLSX, globalThis.FileReader, globalThis.Blob, globalThis.URL, ex);
 
-const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed, getEportStationMax, getWiringLimits, getMountCode, getAbActualCode, AB_COMPAT, getValveSpec, veSet, renderAbPortBody, updateMetalPeWrap, getMixPortOpts, getSiCommonRestriction, getDefaultSlotElbowUnit } = ex;
+const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed, getEportStationMax, getWiringLimits, getMountCode, getAbActualCode, AB_COMPAT, getValveSpec, veSet, renderAbPortBody, updateMetalPeWrap, getMixPortOpts, getSiCommonRestriction, getDefaultSlotElbowUnit, getStationOptionIssues } = ex;
 const S0 = JSON.parse(JSON.stringify(S));
 
 let pass = 0, fail = 0;
@@ -465,6 +465,28 @@ console.log('════ v21) EX500 A3N はプラスコモン不可・単独ブ
   ck('v21 12型の単独ブロック既定は 2A', getDefaultSlotElbowUnit().elbow, '2');
   mkValve({ series:'5', base:'conn', pipe:'横配管', wiring:'dsub', count:4, eport:'U', abCode:'C8' });
   ck('v21 10型の単独ブロック既定は 1A', getDefaultSlotElbowUnit().elbow, '1');
+}
+console.log('════ v21) スペーサ類の組合せ（SMC新方式仕様書の判定式・WEB版仕様書） ════');
+{
+  const iss = () => getStationOptionIssues().map(x => x.msg + ':' + x.st.join(',')).join(' / ');
+  const base = { series:'5', base:'conn', pipe:'横配管', wiring:'dsub', count:4, eport:'U', abCode:'C8', abPipeType:'push', abDir:'ST' };
+  mkValve(base); S.valveTypes = ['3es','3cs','single','single'];
+  getValveSpec(0).type='3es'; getValveSpec(1).type='3cs';
+  getValveSpec(0).manifoldOpt = { residualPerf:true };
+  ck('v21 パーフェクトは 3位置EC 可', iss(), '');
+  getValveSpec(1).manifoldOpt = { residualPerf:true };
+  ck('v21 パーフェクトは 3位置CC 不可', iss(), 'パーフェクトスペーサは2位置・3位置エキゾーストセンタのみ:2');
+  getValveSpec(1).manifoldOpt = {};
+  getValveSpec(2).manifoldOpt = { supSpacerPipe:'2A', supSpacerSize:'L8', exhSpacerPipe:'1A', exhSpacerSize:'C8' };
+  ck('v21 SUPエルボ＋EXHの2段重ねは不可', iss(), '単独SUP/EXHスペーサの2段重ねは両方ストレート(1A)のみ:3');
+  getValveSpec(2).manifoldOpt = { supSpacerPipe:'1A', supSpacerSize:'C8', exhSpacerPipe:'1A', exhSpacerSize:'C8' };
+  ck('v21 ストレート同士の2段重ねは可', iss(), '');
+  S.mountPlate = true;
+  ck('v21 銘板プレート付はスペーサ類不可', iss(), '銘板プレート付（AA/BA/A□/B□）はスペーサ類不可:1,3');
+  S.mountPlate = false; getValveSpec(2).screw = 'B';
+  ck('v21 取付ねじBはスペーサ類不可', iss(), '取付ねじ B/H（六角穴付ボルト）はスペーサ類不可:3');
+  getValveSpec(2).screw = ''; S.abDir = 'EL_UP';
+  ck('v21 エルボ上向きはスペーサ類不可', iss(), 'A,Bポートがエルボ上向きの連はスペーサ類不可（配管と干渉）:1,3');
 }
 console.log(`結果: ${pass} passed / ${fail} failed`);
 process.exit(fail ? 1 : 0);
