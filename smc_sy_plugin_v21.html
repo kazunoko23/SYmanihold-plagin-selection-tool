@@ -3928,6 +3928,10 @@ function getSiCommonRestriction() {
   // EX250: マイナスコモン(PNP)固定
   if (w === 'ex250') return S.ex250Si ? 'P' : null;
 
+  // v21: EX500 Gateway A3N はマイナスコモン。無極性は使える（SMC新方式仕様書 SS5Y5-10SA3 のランプ選択肢は
+  //   無記号/R/U/NS/NZ＝プラスコモンの S・Z だけが無い）→ 'notN'＝プラスコモン不可
+  if (w === 'ex500') return S.ex500Si === 'A3N' ? 'notN' : null;
+
   // EX260: SIコード末尾N=マイナスコモン(PNP) / それ以外=プラスコモン(NPN)（0,CAN,FPN,DPN=制約なし扱い）
   //   v21: v20 までは逆（末尾N=プラス）で、SQA 等でバルブがマイナスコモン(NZ)に直されていた。
   //   EX260_ALL の表（QA=NPN/QAN=PNP）・公式の新方式仕様書の判定（QA=プラスコモン）・JSY 版と一致させた
@@ -3993,10 +3997,11 @@ function veCommonElecRows(idx, spec) {
   var siRestrict = getSiCommonRestriction(); // 'N'=NPN固定 / 'P'=PNP固定 / null=制約なし
   if (siRestrict === 'N' && common !== 'N')  { spec.lampCommon = common = 'N';  isCommon = true; }
   if (siRestrict === 'P' && common !== 'NM') { spec.lampCommon = common = 'NM'; isCommon = true; }
+  if (siRestrict === 'notN' && common === 'N') { spec.lampCommon = common = 'NM'; }
 
   // 節電時: Z/NZ固定（コモン必須・ランプ+サージ付）
   if (isSetsuden) {
-    if (!isCommon) { spec.lampCommon = common = (siRestrict === 'P' ? 'NM' : 'N'); isCommon = true; }
+    if (!isCommon) { spec.lampCommon = common = ((siRestrict === 'P' || siRestrict === 'notN') ? 'NM' : 'N'); isCommon = true; }
     if (!spec.lampLamp) { spec.lampLamp = hasLamp = true; }
   }
   // コモン仕様時・ランプ付時はサージ必須
@@ -4005,7 +4010,7 @@ function veCommonElecRows(idx, spec) {
 
   html += '<div class="ve-sttl" style="margin-top:6px;">ランプ・サージ・コモン仕様</div>';
   if (siRestrict) {
-    var siRestrictLabel = siRestrict === 'N' ? 'プラスコモン（NPN）' : 'マイナスコモン（PNP）';
+    var siRestrictLabel = siRestrict === 'N' ? 'プラスコモン（NPN）' : siRestrict === 'notN' ? '無極性かマイナスコモン（PNP）' : 'マイナスコモン（PNP）';
     html += '<div style="background:rgba(45,123,212,.08);border:1px solid rgba(45,123,212,.3);border-radius:5px;padding:5px 10px;margin-bottom:6px;font-size:9px;color:var(--blue2);line-height:1.5;">'
           + '🔗 SIユニット設定により <strong>' + siRestrictLabel + '</strong> に固定されています<br>'
           + '<span style="color:#94a3b8;">バルブのコモン仕様はSIユニットと一致させてください</span>'
@@ -4024,7 +4029,8 @@ function veCommonElecRows(idx, spec) {
     // 無効条件: 節電時に無極性不可 / SI制約で他が不可
     var dis = (isSetsuden && o.v === '')
            || (siRestrict === 'N'  && o.v !== 'N')
-           || (siRestrict === 'P'  && o.v !== 'NM');
+           || (siRestrict === 'P'  && o.v !== 'NM')
+           || (siRestrict === 'notN' && o.v === 'N');
     html += '<div class="ve-btn' + (sel?' sel':'') + (dis?' ng':'') + '" '
           + (dis ? '' : 'data-vidx="' + idx + '" data-field="lampCommon" data-val="' + o.v + '"')
           + '>' + o.l + '</div>';
@@ -4303,13 +4309,13 @@ function renderVeBulkBody() {
   var siR = getSiCommonRestriction();
   html += '<div class="ve-sttl" style="margin-top:6px;">ランプ・サージ・コモン（一括）</div>';
   if (siR) {
-    var siLbl = siR === 'N' ? 'プラスコモン（NPN）' : 'マイナスコモン（PNP）';
+    var siLbl = siR === 'N' ? 'プラスコモン（NPN）' : siR === 'notN' ? '無極性かマイナスコモン（PNP）' : 'マイナスコモン（PNP）';
     html += '<div class="ve-note" style="margin-bottom:4px;">🔗 SIユニット設定により <strong>' + siLbl + '</strong> に固定</div>';
   }
   html += '<div class="ve-row"><div class="ve-lbl">コモン仕様</div><div class="ve-btns">';
   [{v:'',l:'無極性'},{v:'N',l:'プラスコモン<small>(NPN)</small>'},{v:'NM',l:'マイナスコモン<small>(PNP)</small>'}].forEach(function(o) {
     var sel = (spec.lampCommon||'') === o.v;
-    var dis = (siR === 'N' && o.v !== 'N') || (siR === 'P' && o.v !== 'NM');
+    var dis = (siR === 'N' && o.v !== 'N') || (siR === 'P' && o.v !== 'NM') || (siR === 'notN' && o.v === 'N');
     html += '<div class="ve-btn' + (sel?' sel':'') + (dis?' ng':'') + '" '
           + (dis ? '' : 'data-bfield="lampCommon" data-bval="' + o.v + '"')
           + '>' + o.l + '</div>';
@@ -7220,6 +7226,10 @@ function sanitizeAllValves() {
       spec.lampCommon = 'NM'; spec.lampSurge = true;
       spec.lamp = deriveLampCode(spec.lampLamp, true, 'NM');
     }
+    if (siR === 'notN' && spec.lampCommon === 'N') {
+      spec.lampCommon = 'NM'; spec.lampSurge = true;
+      spec.lamp = deriveLampCode(spec.lampLamp, true, 'NM');
+    }
     // v12: 背圧防止弁H・絞り弁付真空切換弁・残圧排気弁付の成立条件（品番確認で実証）を最終ガード
     if (spec.backpress === 'H' && !backpressAllowed(S.series, spec)) spec.backpress = '';
     if (spec.special === 'vacuum' && S.series === '7') spec.special = '';
@@ -7349,6 +7359,13 @@ function updateCompatList() {
     if (dop.blockingDiscExh) { dc.exh++; if (di === 0) dc.first = true; }
     if (dop.slot === 'sup_block') dc.sb++;
     if (dop.slot === 'exh_block') dc.eb++;
+  }
+  // v21: 金属ベース51型（裏配管形）に外部パイロット仕様は無い（カタログ型式表示「※裏配管形に外部パイロット仕様はありません」・
+  //   SMC新方式仕様書 51型も R のバルブは「外部パイロットベースに変更が必要」）
+  if (S.base === 'metal' && S.pipe === '裏配管') {
+    var extN = 0;
+    for (var ei = 0; ei < (S.valveCount || 0); ei++) { var es = getValveSpec(ei); if (!(es.manifoldOpt || {}).slot && S.valveTypes[ei] !== 'blank' && es.pilot === 'R') extN++; }
+    if (extN) checks.push({ label: '51型（裏配管）: 外部パイロット(R)のバルブは使えない（50R 横配管のみ）', ok: false });
   }
   // v21: 口径混合（CM/LM/M）の連ごとの口径にミリとインチを混ぜない（SMC新方式仕様書「ミリ・インチの混合は不可」）
   if (S.abCode === 'CM' || S.abCode === 'LM' || S.abCode === 'M') {
@@ -9235,6 +9252,20 @@ async function fillNewFormatSpec(file, entries, res) {
     put('ベース', 'E' + it.r, o.label); baseLabel['E' + it.r] = o.label;
   });
   // DINレール長さ等で無記号（空）の設問は既定値のままで良い
+  var cabLbl = Object.keys(B.cells).find(function(k){ return /ケーブル長さを指定/.test(String(B.cells[k])); });
+  if (cabLbl) {
+    var cabRow = rowOf(cabLbl), cabDv = B.dv.find(function(d){ return _nfSqrefRefs(d.sqref).some(function(r){ return rowOf(r) === cabRow; }); });
+    var cabRef = cabDv && _nfSqrefRefs(cabDv.sqref).filter(function(r){ return rowOf(r) === cabRow; })[0];
+    if (cabRef) {
+      var nCab = (S.manifestOpts && S.manifestOpts.conn_cable) || 0;
+      if (nCab > 0) {
+        var want = parseInt(S.connCableLen || '030', 10) / 10;
+        var cabLab = _nfRangeRefs(cabDv.f1).map(function(r){ return B.cells[r]; }).find(function(v){ return v !== undefined && parseFloat(v) === want; });
+        if (cabLab) put('ベース', cabRef, cabLab); else notes.push('コネクタケーブル ' + want + 'm は仕様書の選択肢にありません');
+        if (nCab > 1) notes.push('コネクタケーブルは仕様書では1本です（ツールは' + nCab + '本）');
+      } else if (B.cells[cabRef] !== undefined && !B.f[cabRef]) clearCell('ベース', cabRef);
+    }
+  }
 
   // ── ② バルブ: 共通の設問（シール・電圧・ランプ・マニュアル・取付ねじ・オーダーメイド）──
   var V = SH['バルブ'];
@@ -9337,7 +9368,7 @@ async function fillNewFormatSpec(file, entries, res) {
   // 混合取付（M10/11/12型）: 連ごとのバルブサイズ（3/5 または 5/7）。ツールの搭載バルブは全連 S.series
   R.vsize = (S.base === 'mixed') ? findRow(function(s){ return s === '3,5' || s === '5,7'; }) : 0;
   var rMatch = labelRow('2連マッチング継手');
-  R.mix = rMatch ? findRow(function(s, r){ return r > rMatch && /(^|,)C\d/.test(s) && s.split(',').length >= 4; }) : 0;
+  R.mix = rMatch ? findRow(function(s, r){ return r > rMatch && /(^|,)K?C\d/.test(s) && s.split(',').length >= 4; }) : 0;
   // 配線個別指定（シングル/ダブル）は、ブックが必須とするとき（連数 > 配線方式の最大点数÷2）だけ全連に書く。
   //   ブックは「1か所でも書いたら全連数ぶん」を求める（AJ列「配線指示箇所過不足エラー」）。ブランキング・ブロックの連は 1
   var wireNeed = false;
@@ -9361,6 +9392,8 @@ async function fillNewFormatSpec(file, entries, res) {
     });
     if (wlim === null) wlim = getWiringLimits().sol;
     wireNeed = S.valveCount > wlim / 2;
+    var jf = (P.f['J' + R.wire] || '').replace(/\s/g, '');
+    if (/IF\(ベース!\$?R\$?\d+>\d+,\$?[A-Z]+\$?\d+\)\)$/.test(jf)) wireNeed = true;
   }
   var nSt = 0, skipped = [];
   for (var n = 1; n <= S.valveCount; n++) {

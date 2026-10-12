@@ -57,11 +57,11 @@ new Function(
  __ex.getEportStationMax=getEportStationMax; __ex.getWiringLimits=getWiringLimits;
  __ex.getMountCode=getMountCode; __ex.getAbActualCode=getAbActualCode; __ex.AB_COMPAT=AB_COMPAT;
  __ex.getValveSpec=getValveSpec; __ex.veSet=veSet; __ex.renderAbPortBody=renderAbPortBody;
- __ex.updateMetalPeWrap=updateMetalPeWrap; __ex.getMixPortOpts=getMixPortOpts; __ex.parseManifoldPN=parseManifoldPN;`
+ __ex.updateMetalPeWrap=updateMetalPeWrap; __ex.getMixPortOpts=getMixPortOpts; __ex.parseManifoldPN=parseManifoldPN; __ex.getSiCommonRestriction=getSiCommonRestriction; __ex.getDefaultSlotElbowUnit=getDefaultSlotElbowUnit;`
 )(globalThis.document, globalThis.window, globalThis.alert, globalThis.localStorage,
   globalThis.navigator, globalThis.XLSX, globalThis.FileReader, globalThis.Blob, globalThis.URL, ex);
 
-const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed, getEportStationMax, getWiringLimits, getMountCode, getAbActualCode, AB_COMPAT, getValveSpec, veSet, renderAbPortBody, updateMetalPeWrap, getMixPortOpts } = ex;
+const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed, getEportStationMax, getWiringLimits, getMountCode, getAbActualCode, AB_COMPAT, getValveSpec, veSet, renderAbPortBody, updateMetalPeWrap, getMixPortOpts, getSiCommonRestriction, getDefaultSlotElbowUnit } = ex;
 const S0 = JSON.parse(JSON.stringify(S));
 
 let pass = 0, fail = 0;
@@ -446,6 +446,25 @@ console.log('════ v21) 主弁フッ素ゴム -X90 を品番に付ける�
   ck('v21 取付ねじBの後に -X90', getValvePN(0), 'SY3100-5U1-B-X90');
   sp.screw = ''; sp.seal = '1';
   ck('v21 メタルシールには付けない', getValvePN(0), 'SY3101-5U1');
+}
+console.log('════ v21) EX500 A3N はプラスコモン不可・単独ブロックのエルボは型ごと（SMC新方式仕様書） ════');
+{
+  const sp = mkValve({ series:'5', base:'conn', pipe:'横配管', wiring:'ex500', count:4, eport:'U', abCode:'C8', abPipeType:'push', abDir:'ST' });
+  S.ex500Si = 'A3N';
+  ck('v21 EX500 A3N の制約', getSiCommonRestriction(), 'notN');
+  sp.lampLamp = true; sp.lampSurge = true; sp.lampCommon = 'N'; sp.lamp = 'Z';
+  sanitizeAllValves();
+  ck('v21 EX500 A3N でプラスコモン Z → NZ', getValveSpec(0).lamp, 'NZ');
+  sp.lampCommon = ''; sp.lamp = 'U'; sanitizeAllValves();
+  ck('v21 EX500 A3N で無極性 U はそのまま', getValveSpec(0).lamp, 'U');
+  S.ex500Si = '0';
+  ck('v21 EX500 SIなしは制約なし', getSiCommonRestriction(), null);
+  mkValve({ series:'5', base:'conn', pipe:'裏配管', wiring:'dsub', count:4, eport:'U', abCode:'C8' });
+  ck('v21 11型の単独ブロック既定は 3A', getDefaultSlotElbowUnit().elbow, '3');
+  mkValve({ series:'3', base:'conn', pipe:'上配管', wiring:'dsub', count:4, eport:'U' });
+  ck('v21 12型の単独ブロック既定は 2A', getDefaultSlotElbowUnit().elbow, '2');
+  mkValve({ series:'5', base:'conn', pipe:'横配管', wiring:'dsub', count:4, eport:'U', abCode:'C8' });
+  ck('v21 10型の単独ブロック既定は 1A', getDefaultSlotElbowUnit().elbow, '1');
 }
 console.log(`結果: ${pass} passed / ${fail} failed`);
 process.exit(fail ? 1 : 0);
