@@ -9277,12 +9277,35 @@ async function fillNewFormatSpec(file, entries, res) {
   }
   if (skipped.length) notes.push('仕様書作成シートの連の列が足りず ' + skipped.join('・') + '連目は記入していません');
 
+  // ── ④ EX600: 「I Oユニット部選択」シート（機種＝行・I/Oユニット位置1〜9＝列に「O」）──
+  var ioName = Object.keys(rid).find(function(nm3){ return /ユニット部選択/.test(nm3); });
+  if (ioName && S.wiring === 'ex600') {
+    var ioPath = sheetPath(ioName), ioXml = await _zipEntryText(entries, ioPath);
+    SH[ioName] = { path: ioPath, xml: ioXml, cells: _sheetCellMap(ioXml, sst), f: {}, dv: [] };
+    var IC = SH[ioName].cells, units = S.ex600IoUnits || [];
+    var cnt = /^[1-9]$/.test(S.ex600IoCount || '') ? +S.ex600IoCount : units.length;
+    if (cnt && units.length < cnt) {
+      notes.push('EX600 I/Oユニット' + cnt + '連の機種がツールで未選択です。「I Oユニット部選択」シートで選んでください');
+    }
+    // 位置の見出し行（1,2,3… が並ぶ行）と、機種名の列（EX600-… が並ぶ列）
+    var posCol = {}, hdr = 0;
+    Object.keys(IC).forEach(function(r){ if (!hdr && IC[r] === '1' && IC[_nfNumToCol(_colToNum(colOf2(r)) + 1) + rowOf(r)] === '2') hdr = rowOf(r); });
+    if (hdr) Object.keys(IC).forEach(function(r){ if (rowOf(r) === hdr && /^[1-9]$/.test(IC[r])) posCol[+IC[r]] = colOf2(r); });
+    var modelRow = {};
+    Object.keys(IC).forEach(function(r){ var v = String(IC[r]).trim(); if (/^EX600-/.test(v) && rowOf(r) > hdr) modelRow[v] = rowOf(r); });
+    units.forEach(function(u, k){
+      var rr = modelRow[u], cc3 = posCol[k + 1];
+      if (rr && cc3) put(ioName, cc3 + rr, 'O');
+      else notes.push('I/Oユニット ' + u + '（' + (k + 1) + '連目）はこの仕様書の一覧にありません');
+    });
+  }
+
   // ── 書き出し: 開いたときに全数式を再計算させる ──
   var wb2 = /<calcPr[^>]*\/>/.test(wbXml)
     ? wbXml.replace(/<calcPr([^>]*?)\s*\/>/, function(all, a){ return '<calcPr' + a.replace(/\s*fullCalcOnLoad="[^"]*"/, '') + ' fullCalcOnLoad="1"/>'; })
     : wbXml.replace('</workbook>', '<calcPr fullCalcOnLoad="1"/></workbook>');
   var repl = {}; repl['xl/workbook.xml'] = new TextEncoder().encode(wb2);
-  ['ベース', 'バルブ', '仕様書作成'].forEach(function(nm2){ repl[SH[nm2].path] = new TextEncoder().encode(SH[nm2].xml); });
+  Object.keys(SH).forEach(function(nm2){ repl[SH[nm2].path] = new TextEncoder().encode(SH[nm2].xml); });
   // 計算結果のキャッシュ（calcChain）は残すと古い値が表示されることがあるので外す必要はない（fullCalcOnLoad で再計算）
   var out = _zipBuild(entries, repl);
   var blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
