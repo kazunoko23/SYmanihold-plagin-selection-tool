@@ -57,11 +57,11 @@ new Function(
  __ex.getEportStationMax=getEportStationMax; __ex.getWiringLimits=getWiringLimits;
  __ex.getMountCode=getMountCode; __ex.getAbActualCode=getAbActualCode; __ex.AB_COMPAT=AB_COMPAT;
  __ex.getValveSpec=getValveSpec; __ex.veSet=veSet; __ex.renderAbPortBody=renderAbPortBody;
- __ex.updateMetalPeWrap=updateMetalPeWrap; __ex.getMixPortOpts=getMixPortOpts; __ex.parseManifoldPN=parseManifoldPN; __ex.getSiCommonRestriction=getSiCommonRestriction; __ex.getDefaultSlotElbowUnit=getDefaultSlotElbowUnit; __ex.getStationOptionIssues=getStationOptionIssues;`
+ __ex.updateMetalPeWrap=updateMetalPeWrap; __ex.getMixPortOpts=getMixPortOpts; __ex.parseManifoldPN=parseManifoldPN; __ex.getSiCommonRestriction=getSiCommonRestriction; __ex.getDefaultSlotElbowUnit=getDefaultSlotElbowUnit; __ex.getStationOptionIssues=getStationOptionIssues; __ex.parseMixAb=parseMixAb;`
 )(globalThis.document, globalThis.window, globalThis.alert, globalThis.localStorage,
   globalThis.navigator, globalThis.XLSX, globalThis.FileReader, globalThis.Blob, globalThis.URL, ex);
 
-const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed, getEportStationMax, getWiringLimits, getMountCode, getAbActualCode, AB_COMPAT, getValveSpec, veSet, renderAbPortBody, updateMetalPeWrap, getMixPortOpts, getSiCommonRestriction, getDefaultSlotElbowUnit, getStationOptionIssues } = ex;
+const { S, buildPN, sanitizeAllValves, updateMountOptions, getBlockingDiscPN, getEx250MaxInputBlocks, getValvePN, backpressAllowed, getEportStationMax, getWiringLimits, getMountCode, getAbActualCode, AB_COMPAT, getValveSpec, veSet, renderAbPortBody, updateMetalPeWrap, getMixPortOpts, getSiCommonRestriction, getDefaultSlotElbowUnit, getStationOptionIssues, parseMixAb } = ex;
 const S0 = JSON.parse(JSON.stringify(S));
 
 let pass = 0, fail = 0;
@@ -487,6 +487,25 @@ console.log('════ v21) スペーサ類の組合せ（SMC新方式仕様�
   ck('v21 取付ねじBはスペーサ類不可', iss(), '取付ねじ B/H（六角穴付ボルト）はスペーサ類不可:3');
   getValveSpec(2).screw = ''; S.abDir = 'EL_UP';
   ck('v21 エルボ上向きはスペーサ類不可', iss(), 'A,Bポートがエルボ上向きの連はスペーサ類不可（配管と干渉）:1,3');
+}
+console.log('════ v21) 混合取付 M10/M11 の口径記号（カタログ p.574〜579・品番確認 2026-10-16） ════');
+{
+  const cases = [
+    ['7','横配管','C1210',true],['7','横配管','C1012',true],['7','横配管','C610',true],['7','横配管','C66',true],
+    ['7','横配管','C124',false],['7','横配管','C64',false],['7','横配管','C108',true],['7','横配管','N711',true],
+    ['7','横配管','N117',true],['7','横配管','LN1111',true],['7','横配管','LN97',false],['7','横配管','LN117',false],
+    ['7','横配管','L1212',true],['7','横配管','B610',true],['7','横配管','C10',true],['7','横配管','L12',true],
+    ['7','横配管','N11',true],['7','裏配管','L128',false],['7','裏配管','C1210',true],['7','横配管','CM',true],
+    ['7','裏配管','LM',false],['5','横配管','N39',true],['5','横配管','LN39',false],['5','横配管','LN73',true],
+    ['5','横配管','LN71',false],['5','横配管','L82',false],['5','横配管','L83',false],['5','横配管','L48',true],
+    ['5','横配管','C82',true],['5','横配管','C48',true],['5','横配管','N91',true],['5','横配管','N1',true],
+    ['5','横配管','L6',true],['5','横配管','C2',true],['5','横配管','B44',true],['5','裏配管','L86',false],
+    ['5','裏配管','N97',true],['5','裏配管','LM',false],['5','裏配管','CM',true],['5','横配管','C86',true],
+  ];
+  for (const [ser, pipe, code, okExp] of cases) {
+    S.base = 'mixed'; S.series = ser; S.pipe = pipe;
+    ck(`v21 混合 SS5Y${ser}-M${pipe === '裏配管' ? 11 : 10} ${code} ${okExp ? '成立' : '不成立'}`, !!parseMixAb(code), okExp);
+  }
 }
 console.log(`結果: ${pass} passed / ${fail} failed`);
 process.exit(fail ? 1 : 0);
