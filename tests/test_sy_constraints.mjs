@@ -247,8 +247,9 @@ function mkValve(opts) {
 
 console.log('════ v13 A) ワンタッチ継手径・M5にはねじ種類記号(F/N/T)を付けない ════');
 {
-  mkValve({ series:'3', pipe:'上配管', connUpperPePort:'', spec:{ portSize:'C6', portScrew:'' } });
-  ck('v13 A: SY3130-5U1-C6（ねじ種類なし）は成立', getValvePN(0), 'SY3130-5U1-C6');
+  // v21: ねじ口径 01 は SY5000 の上配管バルブ（SY3000 は M5 のみ・口径の選択肢外は sanitize で外れる）
+  mkValve({ series:'5', pipe:'上配管', connUpperPePort:'', spec:{ portSize:'C6', portScrew:'' } });
+  ck('v13 A: SY5130-5U1-C6（ねじ種類なし）は成立', getValvePN(0), 'SY5130-5U1-C6');
   veSet(0, 'portSize', '01');
   veSet(0, 'portScrew', 'N');
   ck('v13 A: portSize=01(ねじ口径)のときportScrewは保持される', getValveSpec(0).portScrew, 'N');

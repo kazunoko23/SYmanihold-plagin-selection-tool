@@ -1119,6 +1119,7 @@ const EX600_IO_CAT_LABEL = {
 };
 
 // EX260 SIユニット一覧（UI表示と品番逆引きで共用）
+var EX260_NOT_MIXED = ['GAN', 'GBN', 'KAN', 'CAN'];
 var EX260_ALL = [
   { code:'0',   pts:32, com:'—',   conn:'—',    proto:'SIユニットなし' },
   // DeviceNet® — 32点/16点、M12
@@ -1414,6 +1415,8 @@ function parseMixAb(code) {
   }
   return sl.indexOf(dg) >= 0 ? { kind:k, big:'', small:dg } : null;
 }
+// 上配管形バルブの A,B 口径（バルブ編集の選択肢と同じ）
+const UPPER_VALVE_PORTS = { '3':['M5','C2','C3','C4','C6','N1','N3','N7'], '5':['01','C4','C6','C8','N7','N9'], '7':['02','C8','C10','C12','N9','N11'] };
 // 口径混合（連ごとに口径を指示）か: コネクタベース CM/LM、金属ベース M
 function isAbMix(code) {
   if (code === undefined) code = S.abCode;
@@ -2778,7 +2781,9 @@ function renderConnDetail() {
     // EX260: ① プロトコル → ② 出力点数 → ③ 出力極性 → 自動確定
     // カタログp.530 SIユニット仕様表準拠。
     // com: 'NPN'=プラスコモン（無記号系）/ 'PNP'=マイナスコモン（末尾N系）
-    const ex260All = EX260_ALL;
+    /* v21: 混合取付（M10/M11/M12）の EX260 に Ethernet POWERLINK・IO-Link・CC-Link IE TSN（GAN/GBN/KAN/CAN）は無い。
+       品番確認 2026-10-20: SS5Y5-M・SS5Y7-M の M10/M11/M12 × GAN/GBN/KAN/CAN＝24件すべて NG（安全通信 DPN/FPN は OK）。SMC品番生成(THREES)の混合 EX260 にも無い */
+    const ex260All = EX260_ALL.filter(function(o){ return !(S.base === 'mixed' && EX260_NOT_MIXED.indexOf(o.code) >= 0); });
 
     // プロトコル一覧（重複なし）
     var protoList = [];
@@ -5535,6 +5540,9 @@ function buildPN() {
     typeCode = typ + 'S' + (S.ex260Si||'?');
     const isSafety = S.ex260Si === 'FPN' || S.ex260Si === 'DPN';
     notes.push('EX260 一体型シリアル伝送システム（出力' + (S.ex260Pts||'?') + '点）p.530〜531（10/11型）/ p.540〜541（12型）' + (isSafety ? ' ※安全通信プロトコル対応' : ''));
+    // v21: 12型の CC-Link IE TSN（CAN）はカタログの12型の表に記載・SMC WEB の品番確認に未登録（SS5Y3/5/7-12SCAN＝NG、10/11型の CAN は OK）
+    if (S.ex260Si === 'CAN' && S.pipe === '上配管') notes.unshift('⚠ 12型 × EX260 CC-Link IE TSN（SCAN）: カタログ記載・SMC WEB の品番確認に未登録。手配前に SMC へ確認');
+    if (S.base === 'mixed' && S.ex260Si === null) notes.push('混合取付の EX260: Ethernet POWERLINK・IO-Link・CC-Link IE TSN は選択不可（品番確認・SMC品番生成とも無し）');
   }
   else if (S.wiring === 'ex126') {
     if (S.ex126Si === null) complete = false;
@@ -5657,6 +5665,11 @@ function buildPN() {
     }
   }
 
+  // v21: 口径混合 LM（横配管）は P,E の継手方向（エルボ上向き／下向き）が必須（SMC新方式仕様書の必須項目）
+  if (S.abCode === 'LM' && S.pipe === '横配管' && S.peFittingDir !== 'EL_UP' && S.peFittingDir !== 'EL_DN') {
+    complete = false;
+    notes.push('⚠ 口径混合 LM: P,Eポートの継手方向（エルボ上向き／下向き）を選択');
+  }
   // 上配管形・口径混合(CM/LM)はバルブ品番側にA,Bポート口径が必要（未設定だと SY5130-51--- のような
   // プレースホルダ品番になり手配できない）→ 全バルブ分の設定を確定条件に含める
   if (S.pipe === '上配管' || isAbMix()) {
@@ -6077,9 +6090,8 @@ function renderPeFittingSection() {
   if (S.abCode === 'LM' && S.pipe === '横配管') {
     const dir = S.peFittingDir;
     html += `<div style="font-size:9px;color:#94a3b8;margin:6px 0 4px;font-weight:700;letter-spacing:.08em;font-family:var(--mono);">P,E継手方向（LM時）</div>`;
-    html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">`;
+    html += `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px;">`;
     [
-      { id:'ST',    label:'ストレート',   sub:'ST' },
       { id:'EL_UP', label:'上向きエルボ', sub:'EL（上）' },
       { id:'EL_DN', label:'下向きエルボ', sub:'EL（下）' },
     ].forEach(d => {
@@ -6092,8 +6104,9 @@ function renderPeFittingSection() {
       </div>`;
     });
     html += `</div>`;
-    if (!dir) html += `<div style="font-size:9px;color:#94a3b8;margin-top:3px;">※ マニホールド仕様書に記述が必要です</div>`;
-    else       html += `<div style="font-size:9px;color:#15803d;margin-top:3px;">✓ 選択済み: ${dir==='ST'?'ストレート':dir==='EL_UP'?'上向きエルボ':'下向きエルボ'}</div>`;
+    // v21: LM の P,E はエルボの上向き／下向きのみ（SMC新方式仕様書の選択肢 L/B・必須）
+    if (!dir) html += `<div style="font-size:9px;color:#94a3b8;margin-top:3px;">※ 必須（マニホールド仕様書で指示）</div>`;
+    else       html += `<div style="font-size:9px;color:#15803d;margin-top:3px;">✓ 選択済み: ${dir==='EL_UP'?'上向きエルボ':'下向きエルボ'}</div>`;
   }
 
   html += `</div>`;
@@ -6995,6 +7008,8 @@ function applyValveCsv(text) {
     spec.manual = r.manual || '';
     spec.screw = r.screw || '';
     if (r.portSize) spec.portSize = r.portSize;
+    if (r.portSize && S.pipe === '上配管' && UPPER_VALVE_PORTS[r.series || S.series] && UPPER_VALVE_PORTS[r.series || S.series].indexOf(r.portSize) < 0)
+      report.push((i + 1) + '連目: SY' + (r.series || S.series) + '000 の上配管バルブに A,B 口径 ' + r.portSize + ' は無い（' + UPPER_VALVE_PORTS[r.series || S.series].join('/') + '）');
     if (r.portScrew) spec.portScrew = r.portScrew;
     if (r.vacBport) spec.vacBport = r.vacBport;
     if (r.sensorCount) spec.sensorCount = r.sensorCount;
@@ -7227,6 +7242,7 @@ function getMissingItems() {
     if (S.base !== 'metal' && S.connUpperPePort === null) add('P,Eポート口径', 8);
   } else if (S.pipe && S.wiring !== 'm12') {
     if (!S.abCode || S.abCode === '__per_valve__') add('A,Bポート口径', 8);
+    if (S.abCode === 'LM' && S.pipe === '横配管' && S.peFittingDir !== 'EL_UP' && S.peFittingDir !== 'EL_DN') add('P,Eポートの継手方向（LM）', 8);
   }
   if (S.series && S.base && S.pipe && getMountCode() === null) add('取付方法', 9);
   // 上配管形・口径混合(CM/LM)はバルブ連別のA,Bポート口径が必要
@@ -7320,6 +7336,7 @@ function sanitizeAllValves() {
     S.ex600IoPolar = 'minus';
     S.ex600Io = null;
   }
+  if (S.wiring === 'ex260' && S.base === 'mixed' && EX260_NOT_MIXED.indexOf(S.ex260Si) >= 0) S.ex260Si = null;
   // v21: 混合取付 M10/M11 の EX600 は 2/3/4/5 のみ（M12 IN/OUT Aコードの 6〜9 は品番確認 NG）
   if (S.wiring === 'ex600' && mixedEx600IoOnly() && S.ex600Io && mixedEx600IoOnly().indexOf(S.ex600Io) < 0) S.ex600Io = null;
   // EX600: SIユニットあり（0/EP以外）は④の出力極性+コネクタが必須（無記号はSIなしのみ）
@@ -7358,6 +7375,8 @@ function sanitizeAllValves() {
   }
   // v21: 混合取付の口径記号は口径表にある組合せだけ（11型のエルボ等を外す）
   if (S.base === 'mixed' && S.pipe !== '上配管' && S.abCode && !parseMixAb(S.abCode)) S.abCode = null;
+  // v21: LM の P,E 継手方向はエルボのみ（旧版のストレート選択を外す）
+  if (S.peFittingDir === 'ST') S.peFittingDir = null;
   // v13: SY5000金属ベース×EX510はC4が不成立（品番確認で実証。renderAbPortBodyのUI制限と対の防御的補正）
   if (S.base === 'metal' && S.series === '5' && S.wiring === 'ex510' && S.abCode === 'C4') S.abCode = null;
   // バルブ個別: スペーサ口径・SI極性連動のランプ/コモン補正
@@ -7399,6 +7418,9 @@ function sanitizeAllValves() {
     // v13: C10(φ10)は上配管形バルブのSY5000には実在しない（品番確認で実証: SY5130-5U1-C10=NG）。
     // UI(portOpts)側では既に選択肢から外しているが、JSON読込・逆引き経由の残留を封鎖する
     if (sri === '5' && spec.portSize === 'C10' && !(S.base === 'mixed' && S.pipe !== '上配管')) spec.portSize = '';
+    // v21: 上配管バルブの口径はシリーズの選択肢だけ（逆引き・CSV 経由の残留を外す）。
+    //      品番確認 2026-10-20: SY5130-5U1-C2/C3/N1・SY7130-5U1-C2/C3/C4/N1/N3 = NG
+    if (S.pipe === '上配管' && spec.portSize && UPPER_VALVE_PORTS[sri] && UPPER_VALVE_PORTS[sri].indexOf(spec.portSize) < 0) spec.portSize = '';
     // v21: 混合取付 CM/LM の連別口径は、その連のバルブサイズの表にあるものだけ
     if (S.base === 'mixed' && S.pipe !== '上配管' && isAbMix() && spec.portSize
         && !getMixPortOpts(sri === S.series ? 'big' : 'small').some(function(o){ return o.v === spec.portSize; })) spec.portSize = '';
@@ -9455,6 +9477,8 @@ async function fillNewFormatSpec(file, entries, res) {
       var cl = String(B.cells['C' + it.r] || '');
       var std = it.opts.find(function(x){ return x.code === '' && x.label; });
       if (/DINレール長さ/.test(cl) && S.mountMethod === 'din' && std) put('ベース', 'E' + it.r, std.label);
+      // v21: EX260 の SIユニットなし（S0）は出力特性をプラスコモン（無記号）にする（12型の冊は空欄だと「プラスコモンを選択」と出す）
+      else if (/出力特性/.test(cl) && S.wiring === 'ex260' && S.ex260Si === '0' && std) put('ベース', 'E' + it.r, std.label);
       else if (B.cells['E' + it.r] !== undefined && !B.f['E' + it.r]) clearCell('ベース', 'E' + it.r);
       return;
     }
@@ -9579,6 +9603,20 @@ async function fillNewFormatSpec(file, entries, res) {
     R.reducP = rr.find(function(r){ return rowList[r].indexOf('A1') >= 0; }) || 0;
   }
   R.supBlk = labelRow('単独SUP.ブロック'); R.exhBlk = labelRow('単独EXH.ブロック');
+  // v21: 口径混合 LM は主配管（P,Eポート）のエルボ上下方向を P,E 取出し側ごとに指定（ブックは L/B の2択・D側 J71／U側 AI71 等）
+  if (S.abCode === 'LM') {
+    var peDv = P.dv.find(function(d){
+      var vals = _nfRangeRefs(d.f1).map(function(r){ return P.cells[r]; }).filter(function(v){ return v !== undefined; });
+      return vals.join(',') === 'L,B' && _nfSqrefRefs(d.sqref).length === 2;
+    });
+    var peCode = S.peFittingDir === 'EL_UP' ? 'L' : S.peFittingDir === 'EL_DN' ? 'B' : '';
+    if (peDv && peCode) {
+      var peRefs = _nfSqrefRefs(peDv.sqref).sort(function(a, b){ return _colToNum(colOf2(a)) - _colToNum(colOf2(b)); });
+      var pePos = (document.getElementById('sel-eport') || {}).value || 'U';
+      if (pePos === 'D' || pePos === 'B') put('仕様書作成', peRefs[0], peCode);
+      if (pePos === 'U' || pePos === 'B') put('仕様書作成', peRefs[1], peCode);
+    } else if (peDv) notes.push('口径混合 LM: P,Eポートの継手方向（エルボ上向き／下向き）が未選択');
+  }
   // 単独SUP/EXHブロックを使うときは、そのブロックの遮断位置（ブロッキングディスクの位置）をブロック行の次の行に「→」で指定する
   var hasSupBlk = false, hasExhBlk = false;
   for (var bi = 0; bi < S.valveCount; bi++) { var bo = getValveSpec(bi).manifoldOpt || {}; if (bo.slot === 'sup_block') hasSupBlk = true; if (bo.slot === 'exh_block') hasExhBlk = true; }
