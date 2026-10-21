@@ -1555,6 +1555,11 @@ function getSolenoidUsage() {
 function getMaxValveCountForWiring() {
   return getWiringLimits().st;
 }
+// v21: DINレール長さ（D/A/B の □）の上限は原則その配線方式の最大連数。端子台スプリング式（TC）は最大20連だが 24連用まで
+// （品番確認 SS5Y3-10TC-20B・SS5Y3-12TC-04U-D24＝OK）。端子台 T は 10型の D24 が OK・12型と SS5Y7-M10 の D21〜24 が NG で一定しないので 20 まで
+function getMaxDinRailLen() {
+  return (S.wiring === 'term_sp' && S.base !== 'metal') ? 24 : getMaxValveCountForWiring();
+}
 
 // EX250 入力ブロック連数の上限（AS-Interface対応SIのみ制限あり）
 // カタログは「最大連数に制限があります」としか記載がないため、SMC公式WEBカタログの
@@ -6515,7 +6520,7 @@ function renderMountBody() {
 
     // D3〜D24: EX600+EP+上配管・EX600 SIなし時は非表示、それ以外はバルブ連数より大きい値のみ
     if (!isEx600Ep && !isSiNone) {
-    const maxDin = getMaxValveCountForWiring(); // 型式・配線方式による最大連数
+    const maxDin = getMaxDinRailLen(); // v21: コネクタ接続ベースは24連用まで
     lenHtml += `<div style="font-size:9px;color:#94a3b8;margin-bottom:3px;">連数指定（バルブ連数より長い・最大${maxDin}連まで選択可）</div>`;
     lenHtml += `<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:3px;margin-bottom:10px;">`;
     for (let n=3; n<=maxDin; n++) {
@@ -6618,7 +6623,7 @@ function updateMountOptions() {
   }
   // DINレール連数が型式の最大連数を超えていたらリセット
   if (S.mountDinLen && !isNaN(S.mountDinLen)) {
-    var maxDinCheck = getMaxValveCountForWiring();
+    var maxDinCheck = getMaxDinRailLen();
     if (parseInt(S.mountDinLen) > maxDinCheck) S.mountDinLen = null;
   }
   // DINレール長さ□は「バルブ連数より長い」ことが条件（カタログ ⑨注1）
@@ -6818,6 +6823,9 @@ function parseManifoldPN(raw) {
   setBase(base); setPipe(pipe);
   var wcodeRaw = m[3];
   var wres = _applyWiringCode(m[3]);
+  // v21: 生産終了の SI ユニット記号は理由を示す（品番確認には残っているが、新規は後継品）
+  if (!wres && /^S6W[EF]\d?\d?$/.test(m[3])) return { ok: false, error: 'EX600 無線ベース（' + m[3].slice(2, 4) + '＝EX600-WEN/WPN）は 2025年3月生産終了。後継は小型無線リモート EXW1（配線方式「小型無線リモート」）' };
+  if (!wres && /^S6F\d\d?$/.test(m[3])) return { ok: false, error: 'EX600 PROFINET の旧記号 F（EX600-SPN1/2）は 2023年10月生産終了。後継は FA（EX600-SPN3/4）' };
   if (!wres) return { ok: false, error: '配線方式コードを解釈できません: 「' + m[3] + '」' };
   if (wres && wres.note) notes.push(wres.note);
   if (metalAllS) { if (S.wiring === 'ex510') setEx510S('S'); else if (typeof setMetalFlatS === 'function') setMetalFlatS('S'); else S.metalFlatS = 'S'; }
@@ -7365,6 +7373,15 @@ function sanitizeAllValves() {
     if (cmp && S.abCode && !isAbMix()) {
       var validAb = (cmp.ST || []).concat(cmp.EL || [], cmp.SCREW || []);
       if (/^(C\d+|M5|0\d)$/.test(S.abCode) && validAb.indexOf(S.abCode) < 0) S.abCode = null;
+      // v21: エルボ L/B/LN/BN はエルボ一覧（EL）にある口径だけ。11型（裏配管）はエルボなし
+      //（品番確認 SS5Y5-11S6Q2-04U-B4/L6/LN7 等＝NG。逆引きで素通りしていた）
+      var em = S.abCode && S.abCode.match(/^([LB])(N?)(\d+)$/);
+      if (em) {
+        var elOk = (cmp.EL || []).some(function(cc){
+          return em[2] ? (AB_SIZE_DEF[cc] && AB_SIZE_DEF[cc].inchCode === 'N' + em[3] && elbowInchOk(cc)) : cc === 'C' + em[3];
+        });
+        if (!elOk) S.abCode = null;
+      }
       // 交換形 KC□/KN□ は金属ベースの K 一覧にあるときだけ
       var km = S.abCode && S.abCode.match(/^K([CN])(\d+)$/);
       if (km) {
@@ -9653,6 +9670,13 @@ async function fillNewFormatSpec(file, entries, res) {
     wireNeed = S.valveCount > wlim / 2;
     var jf = (P.f['J' + R.wire] || '').replace(/\s/g, '');
     if (/IF\(ベース!\$?R\$?\d+>\d+,\$?[A-Z]+\$?\d+\)\)$/.test(jf)) wireNeed = true;
+    // v21: 混合取付 EX600 の冊は「連数＞12 なら配線個別指定が必須」をセル（AI40 等）に直書き（最大点数32＝16連とは別）。
+    //      ブックに「IF(ベース!R□>N,"必須"」があれば N を閾値に使う（SMC-SS5Y5/7-M10S6 で 13〜16連が過不足エラーになっていた）
+    Object.keys(P.f).some(function(ref){
+      var mN = String(P.f[ref]).replace(/[\s$]/g, '').match(/IF\(ベース!R\d+>(\d+),"必須"/);
+      if (mN && S.valveCount > +mN[1]) { wireNeed = true; return true; }
+      return false;
+    });
   }
   var nSt = 0, skipped = [];
   for (var n = 1; n <= S.valveCount; n++) {
