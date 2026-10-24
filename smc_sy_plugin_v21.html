@@ -9650,21 +9650,32 @@ async function fillNewFormatSpec(file, entries, res) {
   var wireNeed = false;
   if (R.wire) {
     var wlim = null;
-    Object.keys(B.f).some(function(ref){
-      var m4 = B.f[ref].replace(/\$/g, '').match(/IF\(R(\d+)>U(\d+)\/2/);
-      if (!m4) return false;
-      var uf = (B.f['U' + m4[2]] || '').replace(/\$/g, '').match(/INDEX\(([A-Z]+)(\d+):([A-Z]+)\d+,1,F(\d+)\)/);
+    // 最大点数の欄（ベース!U□＝INDEX(表,1,F□)・F□＝MATCH(配線の選択,…)）から、選んだ配線方式の点数を読む
+    function wlimFromU(uRow) {
+      var uf = (B.f['U' + uRow] || '').replace(/\$/g, '').match(/INDEX\(([A-Z]+)(\d+):([A-Z]+)\d+,1,F(\d+)\)/);
       var ff = uf && (B.f['F' + uf[4]] || '').replace(/\$/g, '').match(/MATCH\(E(\d+),([A-Z]+)(\d+):([A-Z]+)\d+/);
-      if (!ff) return false;
+      if (!ff) return null;
       var lab = baseLabel['E' + ff[1]];
       for (var c5 = _colToNum(ff[2]); lab !== undefined && c5 <= _colToNum(ff[4]); c5++) {
         if (B.cells[_nfNumToCol(c5) + ff[3]] === lab) {
           var v5 = B.cells[_nfNumToCol(_colToNum(uf[1]) + c5 - _colToNum(ff[2])) + uf[2]];
-          if (v5 !== undefined && !isNaN(+v5)) wlim = +v5;
-          break;
+          return (v5 !== undefined && !isNaN(+v5)) ? +v5 : null;
         }
       }
-      return true;
+      return null;
+    }
+    Object.keys(B.f).some(function(ref){
+      var m4 = B.f[ref].replace(/\$/g, '').match(/IF\(R(\d+)>U(\d+)\/2/);
+      if (!m4) return false;
+      wlim = wlimFromU(m4[2]);
+      return wlim !== null;
+    });
+    // v21: ベースに判定式が無く、仕様書作成シートの配線個別指定の行（J/AI 列）にだけ「ベース!R□>ベース!U□/2」がある冊（SMC-SS5Y7-M10-2 等）
+    if (wlim === null) Object.keys(P.f).some(function(ref){
+      var m6 = String(P.f[ref]).replace(/[\s$]/g, '').match(/ベース!R\d+>ベース!U(\d+)\/2/);
+      if (!m6) return false;
+      wlim = wlimFromU(m6[1]);
+      return wlim !== null;
     });
     if (wlim === null) wlim = getWiringLimits().sol;
     wireNeed = S.valveCount > wlim / 2;
