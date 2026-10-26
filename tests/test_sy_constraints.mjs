@@ -371,11 +371,11 @@ console.log('════ v13 I) 金属ベースSY7000のA,BポートはC8/C10�
   ck('v13 I: C8はそのまま有効', S.abCode, 'C8');
 }
 
-console.log('════ v13 副産物) SY5000金属ベース×EX510はA,BポートC4が不成立 ════');
+console.log('════ v13 副産物) SY5000金属ベース×EX510のA,BポートC4（v21: 品番確認 OK に変わった） ════');
 {
   mkValve({ series:'5', base:'metal', pipe:'横配管', wiring:'ex510', abCode:'C4', count:5 });
   sanitizeAllValves();
-  ck('v13 副産物: EX510配線でC4はsanitizeで無効化される', S.abCode, null);
+  ck('v13 副産物: v21: EX510配線でもC4は維持される（品番確認 2026-10-26 SS5Y5-50S5N-04D-C4＝OK）', S.abCode, 'C4');
 
   mkValve({ series:'5', base:'metal', pipe:'横配管', wiring:'dsub', metalFlatS:'', abCode:'C4', count:5 });
   sanitizeAllValves();
@@ -459,7 +459,7 @@ console.log('════ v21) EX500 A3N はプラスコモン不可・単独ブ
   sp.lampCommon = ''; sp.lamp = 'U'; sanitizeAllValves();
   ck('v21 EX500 A3N で無極性 U はそのまま', getValveSpec(0).lamp, 'U');
   S.ex500Si = '0';
-  ck('v21 EX500 SIなしは制約なし', getSiCommonRestriction(), null);
+  ck('v21 EX500 SIなし（S0）も同じ制約（新方式仕様書のランプ選択肢）', getSiCommonRestriction(), 'notN');
   mkValve({ series:'5', base:'conn', pipe:'裏配管', wiring:'dsub', count:4, eport:'U', abCode:'C8' });
   ck('v21 11型の単独ブロック既定は 3A', getDefaultSlotElbowUnit().elbow, '3');
   mkValve({ series:'3', base:'conn', pipe:'上配管', wiring:'dsub', count:4, eport:'U' });

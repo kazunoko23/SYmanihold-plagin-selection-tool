@@ -4032,7 +4032,8 @@ function getSiCommonRestriction() {
 
   // v21: EX500 Gateway A3N はマイナスコモン。無極性は使える（SMC新方式仕様書 SS5Y5-10SA3 のランプ選択肢は
   //   無記号/R/U/NS/NZ＝プラスコモンの S・Z だけが無い）→ 'notN'＝プラスコモン不可
-  if (w === 'ex500') return S.ex500Si === 'A3N' ? 'notN' : null;
+  // v21: SIユニットなし（S0）でも同じ（新方式仕様書 SS5Y5-10SA3 のランプ選択肢は SI に関係なく 無記号/R/U/NS/NZ。S0＋Z は記入で無記号に落ちていた）
+  if (w === 'ex500') return S.ex500Si ? 'notN' : null;
 
   // EX260: SIコード末尾N=マイナスコモン(PNP) / それ以外=プラスコモン(NPN)（0,CAN,FPN,DPN=制約なし扱い）
   //   v21: v20 までは逆（末尾N=プラス）で、SQA 等でバルブがマイナスコモン(NZ)に直されていた。
@@ -5916,7 +5917,7 @@ function renderAbPortBody() {
       let available = isEL ? compat.EL : compat.ST;
       // v13: SY5000金属ベース×EX510配線はA,BポートC4が不成立（品番確認で実証:
       //   SS5Y5-50S5N-04D-C4=NG。dsubのSS5Y5-50F1-05D-C4はOK＝配線方式固有の制約）
-      if (S.base === 'metal' && S.series === '5' && S.wiring === 'ex510') available = available.filter(c => c !== 'C4');
+      // v21: 金属ベース SY5000 × EX510 の C4 は品番確認 OK（2026-10-26: SS5Y5-50S5-04U-C4・-05U-C4・SS5Y5-50S5N-04B-C4・SS5Y5-51S5-04D/08D-C4＝OK、新方式仕様書も選択肢あり）。v13 の除外を外した
       // v13: SY7000はエルボにインチ表記が無い（getAbActualCode参照）→ UIのミリ/インチ切替自体を出さない
       // v21: 金属ベースは固定形(C/N)・交換形(KC/KN)を選ぶ
       const isK = S.base === 'metal' && !isEL && S.abFitKind === 'K';
@@ -6825,6 +6826,8 @@ function parseManifoldPN(raw) {
   var wres = _applyWiringCode(m[3]);
   // v21: 生産終了の SI ユニット記号は理由を示す（品番確認には残っているが、新規は後継品）
   if (!wres && /^S6W[EF]\d?\d?$/.test(m[3])) return { ok: false, error: 'EX600 無線ベース（' + m[3].slice(2, 4) + '＝EX600-WEN/WPN）は 2025年3月生産終了。後継は小型無線リモート EXW1（配線方式「小型無線リモート」）' };
+  if (!wres && /^S3R[12]$/.test(m[3])) return { ok: false, error: 'EX120 の SI 記号 ' + m[3].slice(2) + '（CompoBus/S＝EX120-SCS1/SCS2）は 2023年3月生産終了' };
+  if (!wres && /^S([NVY])\d?[A-F]?$/.test(m[3])) return { ok: false, error: 'EX250 の SI 記号 ' + m[3].charAt(1) + '（' + ({ N:'PROFIBUS DP＝EX250-SPR1・2022年11月', V:'CC-Link＝EX250-SMJ2・2019年7月', Y:'CANopen＝EX250-SCA1A・2023年3月' })[m[3].charAt(1)] + '生産終了）。後継は EX600／EX260' };
   if (!wres && /^S6F\d\d?$/.test(m[3])) return { ok: false, error: 'EX600 PROFINET の旧記号 F（EX600-SPN1/2）は 2023年10月生産終了。後継は FA（EX600-SPN3/4）' };
   if (!wres) return { ok: false, error: '配線方式コードを解釈できません: 「' + m[3] + '」' };
   if (wres && wres.note) notes.push(wres.note);
@@ -7394,8 +7397,7 @@ function sanitizeAllValves() {
   if (S.base === 'mixed' && S.pipe !== '上配管' && S.abCode && !parseMixAb(S.abCode)) S.abCode = null;
   // v21: LM の P,E 継手方向はエルボのみ（旧版のストレート選択を外す）
   if (S.peFittingDir === 'ST') S.peFittingDir = null;
-  // v13: SY5000金属ベース×EX510はC4が不成立（品番確認で実証。renderAbPortBodyのUI制限と対の防御的補正）
-  if (S.base === 'metal' && S.series === '5' && S.wiring === 'ex510' && S.abCode === 'C4') S.abCode = null;
+  // v21: v13 の「SY5000金属ベース×EX510 は C4 不成立」は外した（品番確認 2026-10-26 で OK・上の renderAbPortBody 参照）
   // バルブ個別: スペーサ口径・SI極性連動のランプ/コモン補正
   var sizes = getOptSizes(S.series);
   var siR = getSiCommonRestriction();
